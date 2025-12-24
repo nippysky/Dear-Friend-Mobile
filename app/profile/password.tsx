@@ -1,214 +1,294 @@
 // app/profile/password.tsx
+import { Ionicons } from "@expo/vector-icons";
+import { useMutation } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { apiFetch } from "../../src/lib/api";
 import { requireAuth } from "../../src/lib/requireAuth";
 import { useTheme } from "../../src/theme/ThemeProvider";
 
-function Field({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder: string;
-}) {
-  const { t } = useTheme();
+type Me = {
+  id: string;
+  email: string | null;
+  username: string | null;
+  displayName: string | null;
+};
 
-  return (
-    <View
-      style={{
-        backgroundColor: t.color.surfaceAlt,
-        borderWidth: 1,
-        borderColor: t.color.border,
-        borderRadius: t.radius.xl,
-        padding: t.space[12], // ✅ token exists
-      }}
-    >
-      <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "800" }}>
-        {label}
-      </Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        secureTextEntry
-        placeholder={placeholder}
-        placeholderTextColor={t.color.textMuted}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={{
-          marginTop: 8,
-          color: t.color.text,
-          fontSize: t.text.md,
-          fontWeight: "700",
-        }}
-        returnKeyType="done"
-      />
-    </View>
-  );
-}
+type MeResponse = { user: Me };
 
 export default function ChangePasswordScreen() {
   const { t } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const [me, setMe] = useState<Me | null>(null);
+  const [meLoading, setMeLoading] = useState(true);
 
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [currentPw, setCurrentPw] = useState("");
+  const [nextPw, setNextPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
 
-  const valid = useMemo(() => {
-    const cur = currentPassword.trim();
-    const next = newPassword.trim();
-    const conf = confirm.trim();
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
 
-    if (!cur) return false;
-    if (next.length < 8) return false;
-    if (next !== conf) return false;
-    if (next === cur) return false;
-    return true;
-  }, [currentPassword, newPassword, confirm]);
+  useEffect(() => {
+    let alive = true;
 
-  const onSubmit = async () => {
-    setMsg(null);
-    Keyboard.dismiss();
+    (async () => {
+      const ok = await requireAuth("/profile/password");
+      if (!ok) {
+        if (alive) setMeLoading(false);
+        return;
+      }
 
-    const ok = await requireAuth("/profile/password");
-    if (!ok) return;
+      try {
+        const data = await apiFetch<MeResponse>("/api/me", { method: "GET" });
+        if (alive) setMe(data?.user ?? null);
+      } finally {
+        if (alive) setMeLoading(false);
+      }
+    })();
 
-    setBusy(true);
-    try {
-      await apiFetch("/api/auth/change-password", {
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const username = useMemo(() => me?.username?.trim() || "—", [me]);
+  const email = useMemo(() => me?.email?.trim() || "—", [me]);
+
+  const validation = useMemo(() => {
+    if (nextPw.length > 0 && nextPw.length < 8) return "New password must be at least 8 characters.";
+    if (nextPw && confirmPw && nextPw !== confirmPw) return "Passwords don’t match.";
+    if (currentPw && nextPw && currentPw === nextPw) return "New password must be different.";
+    return null;
+  }, [currentPw, nextPw, confirmPw]);
+
+  const canSubmit =
+    currentPw.trim().length >= 1 &&
+    nextPw.trim().length >= 8 &&
+    confirmPw.trim().length >= 8 &&
+    !validation;
+
+  const changePassword = useMutation({
+    mutationFn: async () => {
+      // 🔧 Change this if your API route name differs
+      return apiFetch<{ ok: boolean }>("/api/auth/change-password", {
         method: "POST",
-        json: { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() },
+        json: { currentPassword: currentPw, newPassword: nextPw },
       });
-
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setMsg("Password updated.");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirm("");
-    } catch (e: any) {
-      setMsg(e?.message ?? "Couldn’t update password.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const isSuccess = msg === "Password updated.";
+    },
+    onSuccess: async () => {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.back();
+    },
+  });
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.color.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
     >
-      <Pressable onPress={Keyboard.dismiss} style={{ flex: 1 }} accessible={false}>
-        <View
-          style={{
-            flex: 1,
-            paddingTop: insets.top + 14,
-            paddingBottom: insets.bottom + 18,
-            paddingHorizontal: t.space[16],
-          }}
-        >
-          {/* Top bar */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Pressable
-              onPress={() => router.back()}
-              hitSlop={10}
-              style={({ pressed }) => ({ paddingVertical: 8, paddingRight: 10, opacity: pressed ? 0.85 : 1 })}
-            >
-              <Text style={{ color: t.color.textMuted, fontWeight: "900" }}>Back</Text>
-            </Pressable>
+      <View style={{ paddingTop: insets.top + 10, paddingHorizontal: t.space[16] }}>
+        {/* Header */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={10}
+            style={({ pressed }) => ({ paddingVertical: 8, paddingRight: 10, opacity: pressed ? 0.85 : 1 })}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Ionicons name="chevron-back" size={18} color={t.color.textMuted} />
+              <Text style={{ color: t.color.textMuted, fontWeight: "700" }}>Back</Text>
+            </View>
+          </Pressable>
 
-            <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.lg, letterSpacing: -0.4 }}>
-              Password
-            </Text>
-
-            <View style={{ width: 44 }} />
-          </View>
-
-          <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "700" }}>
-            Use 8+ characters. Don’t reuse your current password.
+          <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.md, letterSpacing: -0.2 }}>
+            Change password
           </Text>
 
-          {/* Card */}
-          <View
-            style={{
-              marginTop: 14,
-              backgroundColor: t.color.surface,
-              borderWidth: 1,
-              borderColor: t.color.border,
-              borderRadius: t.radius.xl,
-              padding: t.space[16],
-              gap: 12,
-            }}
-          >
-            <Field
-              label="Current password"
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              placeholder="••••••••"
-            />
-            <Field
-              label="New password"
-              value={newPassword}
-              onChangeText={setNewPassword}
-              placeholder="8+ characters"
-            />
-            <Field
-              label="Confirm new password"
-              value={confirm}
-              onChangeText={setConfirm}
-              placeholder="Repeat new password"
-            />
-
-            {msg ? (
-              <Text style={{ marginTop: 2, color: isSuccess ? t.color.accent : "#B42318", fontWeight: "800" }}>
-                {msg}
-              </Text>
-            ) : null}
-
-            <Pressable
-              onPress={onSubmit}
-              disabled={!valid || busy}
-              style={({ pressed }) => ({
-                marginTop: 2,
-                paddingVertical: 14,
-                borderRadius: t.radius.pill,
-                backgroundColor: valid && !busy ? t.color.accent : t.color.border,
-                alignItems: "center",
-                opacity: pressed && valid ? 0.9 : 1,
-              })}
-            >
-              <Text style={{ color: t.color.textOnAccent, fontWeight: "900" }}>
-                {busy ? "Updating..." : "Update password"}
-              </Text>
-            </Pressable>
-
-            <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "700" }}>
-              Forgot password? Coming next.
-            </Text>
-          </View>
+          <View style={{ width: 44 }} />
         </View>
-      </Pressable>
+
+        {/* Signed-in card */}
+        <View
+          style={{
+            marginTop: 12,
+            backgroundColor: t.color.surface,
+            borderWidth: 1,
+            borderColor: t.color.border,
+            borderRadius: t.radius.xl,
+            padding: 14,
+          }}
+        >
+          {meLoading ? (
+            <View style={{ alignItems: "center", paddingVertical: 8 }}>
+              <ActivityIndicator />
+            </View>
+          ) : (
+            <>
+              <Text style={{ color: t.color.textMuted, fontWeight: "700" }}>Signed in as</Text>
+              <Text style={{ marginTop: 6, color: t.color.text, fontWeight: "900" }}>
+                @{username === "—" ? "—" : username}
+              </Text>
+              <Text style={{ marginTop: 2, color: t.color.textMuted, fontWeight: "700" }}>{email}</Text>
+            </>
+          )}
+        </View>
+
+        {/* Form */}
+        <View
+          style={{
+            marginTop: 12,
+            backgroundColor: t.color.surface,
+            borderWidth: 1,
+            borderColor: t.color.border,
+            borderRadius: t.radius.xl,
+            padding: 14,
+          }}
+        >
+          <Text style={{ color: t.color.text, fontWeight: "900" }}>Update your password</Text>
+
+          {/* Current */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 6 }}>Current password</Text>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                borderWidth: 1,
+                borderColor: t.color.border,
+                backgroundColor: t.color.surfaceAlt,
+                borderRadius: 999,
+                paddingHorizontal: 14,
+              }}
+            >
+              <TextInput
+                value={currentPw}
+                onChangeText={setCurrentPw}
+                placeholder="Enter current password"
+                placeholderTextColor={t.color.textMuted}
+                secureTextEntry={!showCurrent}
+                style={{ flex: 1, paddingVertical: 11, color: t.color.text, fontWeight: "700" }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                onPress={() => setShowCurrent((v) => !v)}
+                hitSlop={10}
+                style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1, paddingLeft: 10, paddingVertical: 8 })}
+              >
+                <Ionicons name={showCurrent ? "eye-off-outline" : "eye-outline"} size={18} color={t.color.textMuted} />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* New */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 6 }}>New password</Text>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                borderWidth: 1,
+                borderColor: t.color.border,
+                backgroundColor: t.color.surfaceAlt,
+                borderRadius: 999,
+                paddingHorizontal: 14,
+              }}
+            >
+              <TextInput
+                value={nextPw}
+                onChangeText={setNextPw}
+                placeholder="At least 8 characters"
+                placeholderTextColor={t.color.textMuted}
+                secureTextEntry={!showNext}
+                style={{ flex: 1, paddingVertical: 11, color: t.color.text, fontWeight: "700" }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Pressable
+                onPress={() => setShowNext((v) => !v)}
+                hitSlop={10}
+                style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1, paddingLeft: 10, paddingVertical: 8 })}
+              >
+                <Ionicons name={showNext ? "eye-off-outline" : "eye-outline"} size={18} color={t.color.textMuted} />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Confirm */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 6 }}>Confirm new password</Text>
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: t.color.border,
+                backgroundColor: t.color.surfaceAlt,
+                borderRadius: 999,
+                paddingHorizontal: 14,
+              }}
+            >
+              <TextInput
+                value={confirmPw}
+                onChangeText={setConfirmPw}
+                placeholder="Re-enter new password"
+                placeholderTextColor={t.color.textMuted}
+                secureTextEntry
+                style={{ paddingVertical: 11, color: t.color.text, fontWeight: "700" }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+          </View>
+
+          {validation ? (
+            <Text style={{ marginTop: 10, color: t.color.textMuted, fontWeight: "800" }}>{validation}</Text>
+          ) : null}
+
+          {changePassword.isError ? (
+            <Text style={{ marginTop: 10, color: t.color.textMuted, fontWeight: "900" }}>
+              {(changePassword.error as Error)?.message ?? "Couldn’t update password."}
+            </Text>
+          ) : null}
+
+          <Pressable
+            disabled={!canSubmit || changePassword.isPending}
+            onPress={async () => {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              changePassword.mutate();
+            }}
+            style={({ pressed }) => ({
+              marginTop: 14,
+              paddingVertical: 12,
+              borderRadius: 999,
+              backgroundColor: canSubmit ? t.color.accent : t.color.border,
+              opacity: pressed ? 0.92 : 1,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 10,
+            })}
+          >
+            {changePassword.isPending ? <ActivityIndicator color={t.color.textOnAccent} /> : null}
+            <Text style={{ fontWeight: "900", color: t.color.textOnAccent }}>
+              {changePassword.isPending ? "Updating…" : "Update password"}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useCreateReply } from "../../src/hooks/useCreateReply";
 import { usePost } from "../../src/hooks/usePost";
+import { useToggleLike } from "../../src/hooks/useToggleLike";
 import { apiFetch } from "../../src/lib/api";
 import { isAuthed } from "../../src/lib/authState";
 import { requireAuth } from "../../src/lib/requireAuth";
@@ -86,7 +87,7 @@ function TinyPill({ text }: { text: string }) {
         borderColor: withAlpha(t.color.border, 0.9),
       }}
     >
-      <Text style={{ color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "650" as any }}>{text}</Text>
+      <Text style={{ color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "600" }}>{text}</Text>
     </View>
   );
 }
@@ -126,25 +127,23 @@ function IconChip({
   );
 }
 
-function PinnedTag() {
-  const { t } = useTheme();
-  return (
-    <View
-      style={{
-        alignSelf: "flex-start",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        backgroundColor: withAlpha(t.color.blushSoft, 0.9),
-        borderWidth: 1,
-        borderColor: withAlpha(t.color.border, 0.9),
-        marginBottom: 10,
-      }}
-    >
-      <Text style={{ color: t.color.text, fontWeight: "800" }}>Most Helpful</Text>
-    </View>
-  );
-}
+type PostShape = {
+  id: string;
+  category: Cat;
+  body: string;
+  likedByMe: boolean;
+  author: { username: string };
+  counts: { likes: number; replies: number };
+};
+
+type ReplyItem = {
+  id: string;
+  body: string;
+  isPinned?: boolean;
+  likedByMe: boolean;
+  author: { id: string; username: string; displayName: string | null };
+  counts: { likes: number };
+};
 
 export default function PostDetail() {
   const { t } = useTheme();
@@ -160,8 +159,10 @@ export default function PostDetail() {
   const validPostId = !!postId && isUuid(postId);
 
   const { data, isLoading, isError, error, refetch } = usePost(postId, { enabled: validPostId });
-  const post = data?.post;
-  const replies = data?.replies ?? [];
+  const post = (data?.post ?? null) as PostShape | null;
+  const replies = (data?.replies ?? []) as ReplyItem[];
+
+  const tint = post ? categoryTint(t, post.category) : t.color.bg;
 
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [reply, setReply] = useState("");
@@ -180,44 +181,12 @@ export default function PostDetail() {
 
   const createReply = useCreateReply(postId);
 
-  const tint = post ? categoryTint(t, post.category) : t.color.bg;
+  // ✅ Use hook for POST likes (and make sure we invalidate both feed + post)
+  const togglePostLike = useToggleLike({ postId, invalidateKey: ["post", postId] });
 
-  // ✅ generalized like mutations
-  const togglePostLike = useMutation({
-    mutationFn: async (vars: { postId: string; liked: boolean }) => {
-      return apiFetch(`/api/likes`, {
-        method: vars.liked ? "DELETE" : "POST",
-        json: { postId: vars.postId },
-      });
-    },
-    onError: async () => {
-      await qc.invalidateQueries({ queryKey: ["post", postId] });
-      await qc.invalidateQueries({ queryKey: ["feed"] });
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["post", postId] });
-      await qc.invalidateQueries({ queryKey: ["feed"] });
-    },
-  });
-
-  const toggleReplyLike = useMutation({
-    mutationFn: async (vars: { replyId: string; liked: boolean }) => {
-      return apiFetch(`/api/likes`, {
-        method: vars.liked ? "DELETE" : "POST",
-        json: { replyId: vars.replyId },
-      });
-    },
-    onError: async () => {
-      await qc.invalidateQueries({ queryKey: ["post", postId] });
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["post", postId] });
-    },
-  });
-
-  const patchPostCaches = useCallback(
+  const patchPostLikeEverywhere = useCallback(
     (nextLiked: boolean) => {
-      // patch post detail
+      // Patch post cache
       qc.setQueryData(["post", postId], (old: any) => {
         if (!old?.post) return old;
         const cur = !!old.post.likedByMe;
@@ -228,22 +197,18 @@ export default function PostDetail() {
           post: {
             ...old.post,
             likedByMe: nextLiked,
-            counts: {
-              ...old.post.counts,
-              likes: Math.max(0, (old.post.counts?.likes ?? 0) + delta),
-            },
+            counts: { ...old.post.counts, likes: Math.max(0, (old.post.counts?.likes ?? 0) + delta) },
           },
         };
       });
 
-      // patch feed snapshot too (keeps screens in sync)
+      // Patch feed cache too
       qc.setQueryData(["feed"], (old: any) => {
-        if (!old?.items) return old;
+        if (!old?.items || !Array.isArray(old.items)) return old;
         const nextItems = old.items.map((it: any) => {
           if (!it || it.id !== postId) return it;
           const cur = !!it.likedByMe;
           const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
-
           return {
             ...it,
             likedByMe: nextLiked,
@@ -251,27 +216,6 @@ export default function PostDetail() {
           };
         });
         return { ...old, items: nextItems };
-      });
-    },
-    [qc, postId]
-  );
-
-  const patchReplyCache = useCallback(
-    (replyId: string, nextLiked: boolean) => {
-      qc.setQueryData(["post", postId], (old: any) => {
-        if (!old?.replies) return old;
-        const nextReplies = old.replies.map((r: any) => {
-          if (!r || r.id !== replyId) return r;
-          const cur = !!r.likedByMe;
-          const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
-
-          return {
-            ...r,
-            likedByMe: nextLiked,
-            counts: { ...r.counts, likes: Math.max(0, (r.counts?.likes ?? 0) + delta) },
-          };
-        });
-        return { ...old, replies: nextReplies };
       });
     },
     [qc, postId]
@@ -287,14 +231,61 @@ export default function PostDetail() {
     const nextLiked = !currentLiked;
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    patchPostCaches(nextLiked);
+
+    // ✅ optimistic
+    patchPostLikeEverywhere(nextLiked);
 
     try {
-      await togglePostLike.mutateAsync({ postId, liked: currentLiked });
+      // IMPORTANT: hook expects CURRENT state
+      await togglePostLike.mutateAsync(currentLiked);
+
+      // ✅ confirm
+      await qc.invalidateQueries({ queryKey: ["post", postId] });
+      await qc.invalidateQueries({ queryKey: ["feed"] });
     } catch {
-      // onError invalidates
+      await qc.invalidateQueries({ queryKey: ["post", postId] });
+      await qc.invalidateQueries({ queryKey: ["feed"] });
     }
-  }, [validPostId, postId, post, patchPostCaches, togglePostLike]);
+  }, [validPostId, post, postId, togglePostLike, patchPostLikeEverywhere, qc]);
+
+  // ✅ Reply like mutation (dynamic replyId)
+  const toggleReplyLike = useMutation({
+    mutationFn: async (vars: { replyId: string; liked: boolean }) => {
+      if (vars.liked) {
+        return apiFetch(`/api/likes`, { method: "DELETE", json: { replyId: vars.replyId } });
+      }
+      return apiFetch(`/api/likes`, { method: "POST", json: { replyId: vars.replyId } });
+    },
+    onMutate: async (vars) => {
+      const nextLiked = !vars.liked;
+
+      // optimistic patch inside post cache
+      qc.setQueryData(["post", postId], (old: any) => {
+        if (!old?.replies) return old;
+
+        const nextReplies = old.replies.map((r: any) => {
+          if (!r || r.id !== vars.replyId) return r;
+          const cur = !!r.likedByMe;
+          const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
+          return {
+            ...r,
+            likedByMe: nextLiked,
+            counts: { ...r.counts, likes: Math.max(0, (r.counts?.likes ?? 0) + delta) },
+          };
+        });
+
+        return { ...old, replies: nextReplies };
+      });
+
+      return { prev: qc.getQueryData(["post", postId]) };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["post", postId], ctx.prev);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["post", postId] });
+    },
+  });
 
   const onLikeReply = useCallback(
     async (replyId: string, currentLiked: boolean) => {
@@ -303,18 +294,11 @@ export default function PostDetail() {
       const ok = await requireAuth(`/post/${postId}`);
       if (!ok) return;
 
-      const nextLiked = !currentLiked;
-
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      patchReplyCache(replyId, nextLiked);
 
-      try {
-        await toggleReplyLike.mutateAsync({ replyId, liked: currentLiked });
-      } catch {
-        // onError invalidates
-      }
+      await toggleReplyLike.mutateAsync({ replyId, liked: currentLiked });
     },
-    [validPostId, postId, patchReplyCache, toggleReplyLike]
+    [validPostId, postId, toggleReplyLike]
   );
 
   const canSend = reply.trim().length >= 2 && !createReply.isPending;
@@ -331,7 +315,9 @@ export default function PostDetail() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await createReply.mutateAsync(text);
     setReply("");
-  }, [validPostId, postId, reply, createReply]);
+    await qc.invalidateQueries({ queryKey: ["post", postId] });
+    await qc.invalidateQueries({ queryKey: ["feed"] });
+  }, [validPostId, postId, reply, createReply, qc]);
 
   const showInvalid = !validPostId;
 
@@ -392,7 +378,7 @@ export default function PostDetail() {
                 icon={post.likedByMe ? "heart" : "heart-outline"}
                 label={`${post.counts.likes}`}
                 onPress={onLikePost}
-                active={!!post.likedByMe}
+                active={post.likedByMe}
               />
             </View>
 
@@ -410,10 +396,8 @@ export default function PostDetail() {
             </Text>
 
             <View style={{ marginTop: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: t.color.textMuted, fontWeight: "650" as any }}>
-                @{post.author.username}
-              </Text>
-              <Text style={{ color: t.color.textMuted, fontWeight: "650" as any }}>
+              <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>@{post.author.username}</Text>
+              <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>
                 {post.counts.replies} {post.counts.replies === 1 ? "reply" : "replies"}
               </Text>
             </View>
@@ -432,7 +416,7 @@ export default function PostDetail() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.color.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 10 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
     >
       {showInvalid ? (
         <View style={{ flex: 1, justifyContent: "center", padding: t.space[16] }}>
@@ -503,22 +487,27 @@ export default function PostDetail() {
                     padding: 14,
                   }}
                 >
-                  {item.isPinned ? <PinnedTag /> : null}
-
-                  <Text style={{ color: t.color.text, fontWeight: "700", fontSize: 16, lineHeight: 22, letterSpacing: -0.2 }}>
+                  {/* Reply body: normal (not bold), slightly heavier than username */}
+                  <Text
+                    style={{
+                      color: t.color.text,
+                      fontWeight: "600",
+                      fontSize: 16,
+                      lineHeight: 22,
+                      letterSpacing: -0.2,
+                    }}
+                  >
                     {item.body}
                   </Text>
 
                   <View style={{ marginTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                    <Text style={{ color: t.color.textMuted, fontWeight: "650" as any }}>
-                      @{item.author.username}
-                    </Text>
+                    <Text style={{ color: t.color.textMuted, fontWeight: "500" }}>@{item.author.username}</Text>
 
                     <IconChip
                       icon={item.likedByMe ? "heart" : "heart-outline"}
                       label={`${item.counts.likes}`}
-                      active={!!item.likedByMe}
-                      onPress={() => onLikeReply(item.id, !!item.likedByMe)}
+                      active={item.likedByMe}
+                      onPress={() => onLikeReply(item.id, item.likedByMe)}
                     />
                   </View>
                 </View>
@@ -526,6 +515,7 @@ export default function PostDetail() {
             )}
           />
 
+          {/* No reply-to-reply. Single composer replies to the post only. */}
           {authed === true ? (
             <View
               style={{
@@ -557,7 +547,7 @@ export default function PostDetail() {
                     paddingHorizontal: 14,
                     paddingVertical: 11,
                     color: t.color.text,
-                    fontWeight: "650" as any,
+                    fontWeight: "600",
                   }}
                 />
 

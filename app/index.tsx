@@ -1,7 +1,7 @@
 // app/index.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
@@ -22,7 +22,7 @@ type FeedItem = {
   author: { id: string; username: string; displayName: string | null };
   counts: { replies: number; likes: number };
   pinnedReplyId: string | null;
-  likedByMe?: boolean; // ✅ now provided by API
+  likedByMe?: boolean; // ✅ now returned by API
 };
 
 type FeedFilter = "ALL" | FeedItem["category"];
@@ -69,7 +69,15 @@ function withAlpha(color: string, alpha: number) {
   return color;
 }
 
-function FilterPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function FilterPill({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
   const { t } = useTheme();
   return (
     <Pressable
@@ -288,108 +296,12 @@ function CategoryChip({ label, onPress }: { label: string; onPress: () => void }
   );
 }
 
-function EmptyState({
-  filter,
-  onAsk,
-  headerOffset,
-  tint,
-}: {
-  filter: FeedFilter;
-  onAsk: () => void;
-  headerOffset: number;
-  tint: string;
-}) {
-  const { t } = useTheme();
-  const insets = useSafeAreaInsets();
-
-  const title = filter === "ALL" ? "No questions yet" : `No ${categoryLabel(filter)} questions yet`;
-  const subtitle =
-    filter === "ALL"
-      ? "Be the first to ask something thoughtful."
-      : `Start the ${categoryLabel(filter)} feed with a good question.`;
-
-  return (
-    <View style={{ flex: 1, backgroundColor: t.color.bg }}>
-      <LinearGradient
-        colors={[withAlpha(tint, 0.6), withAlpha(tint, 0.28), withAlpha(t.color.bg, 1)]}
-        start={{ x: 0.2, y: 0.05 }}
-        end={{ x: 0.85, y: 0.95 }}
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-      />
-
-      <View
-        style={{
-          flex: 1,
-          paddingTop: headerOffset,
-          paddingBottom: Math.max(120, insets.bottom + 90),
-          paddingHorizontal: t.space[16],
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <View
-          style={{
-            width: 64,
-            height: 64,
-            borderRadius: 32,
-            backgroundColor: withAlpha(t.color.surface, 0.92),
-            borderWidth: 1,
-            borderColor: withAlpha(t.color.border, 0.9),
-            alignItems: "center",
-            justifyContent: "center",
-            shadowOpacity: 0.08,
-            shadowRadius: 16,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 3,
-          }}
-        >
-          <Ionicons name="sparkles-outline" size={28} color={t.color.text} />
-        </View>
-
-        <Text style={{ marginTop: 16, fontSize: t.text.lg, fontWeight: "800", color: t.color.text, textAlign: "center" }}>
-          {title}
-        </Text>
-
-        <Text
-          style={{
-            marginTop: 8,
-            fontSize: t.text.sm,
-            fontWeight: "600",
-            color: t.color.textMuted,
-            textAlign: "center",
-            lineHeight: 20,
-            maxWidth: 320,
-          }}
-        >
-          {subtitle}
-        </Text>
-
-        <Pressable
-          onPress={onAsk}
-          hitSlop={10}
-          style={({ pressed }) => ({
-            marginTop: 16,
-            paddingHorizontal: 14,
-            paddingVertical: 10,
-            borderRadius: t.radius.pill,
-            backgroundColor: withAlpha(t.color.surface, 0.92),
-            borderWidth: 1,
-            borderColor: withAlpha(t.color.border, 0.9),
-            opacity: pressed ? 0.85 : 1,
-          })}
-        >
-          <Text style={{ color: t.color.text, fontWeight: "700" }}>Ask the first question</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function ReelItem({
   item,
   height,
   onLike,
   onOpenPost,
+  liked,
   headerOffset,
   showCategoryChip,
   onSelectCategory,
@@ -398,6 +310,7 @@ function ReelItem({
   height: number;
   onLike: () => void;
   onOpenPost: () => void;
+  liked: boolean;
   headerOffset: number;
   showCategoryChip: boolean;
   onSelectCategory: (c: FeedItem["category"]) => void;
@@ -407,7 +320,6 @@ function ReelItem({
 
   const label = categoryLabel(item.category);
   const tint = categoryTint(t, item.category);
-  const liked = !!item.likedByMe;
 
   const isLong = item.body.length > PREVIEW_CHARS;
   const preview = isLong ? item.body.slice(0, PREVIEW_CHARS).trimEnd() + "…" : item.body;
@@ -481,7 +393,6 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
 
   const headerOffset = insets.top + HEADER_HEIGHT + 18;
-
   const listRef = useRef<FlashListRef<FeedItem> | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useFeed();
@@ -525,29 +436,16 @@ export default function FeedScreen() {
     [router]
   );
 
-  // ✅ single mutation, no per-item hooks
-  const togglePostLike = useMutation({
-    mutationFn: async (vars: { postId: string; liked: boolean }) => {
-      return apiFetch(`/api/likes`, {
-        method: vars.liked ? "DELETE" : "POST",
-        json: { postId: vars.postId },
-      });
-    },
-    onError: async () => {
-      // rollback to canonical
-      await qc.invalidateQueries({ queryKey: ["feed"] });
-    },
-    onSuccess: async () => {
-      // keep things consistent everywhere
-      await qc.invalidateQueries({ queryKey: ["feed"] });
-    },
-  });
-
-  const patchFeedLike = useCallback(
+  // ✅ hard-sync helper: patch feed + patch post cache (if present) + invalidate post
+  const patchPostLikeEverywhere = useCallback(
     (postId: string, nextLiked: boolean) => {
-      qc.setQueryData(["feed"], (old: any) => {
-        if (!old?.items) return old;
-        const nextItems = old.items.map((it: any) => {
+      // Patch FEED
+      qc.setQueryData(["feed"], (old: unknown) => {
+        if (!old || typeof old !== "object") return old;
+        const o = old as { items?: FeedItem[] };
+        if (!Array.isArray(o.items)) return old;
+
+        const nextItems = o.items.map((it) => {
           if (!it || it.id !== postId) return it;
           const cur = !!it.likedByMe;
           const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
@@ -555,35 +453,67 @@ export default function FeedScreen() {
           return {
             ...it,
             likedByMe: nextLiked,
-            counts: {
-              ...it.counts,
-              likes: Math.max(0, (it.counts?.likes ?? 0) + delta),
-            },
+            counts: { ...it.counts, likes: Math.max(0, (it.counts?.likes ?? 0) + delta) },
           };
         });
-        return { ...old, items: nextItems };
+
+        return { ...o, items: nextItems };
       });
+
+      // Patch POST DETAIL (only if it already exists in cache)
+      qc.setQueryData(["post", postId], (old: any) => {
+        if (!old?.post) return old;
+        const cur = !!old.post.likedByMe;
+        const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
+
+        return {
+          ...old,
+          post: {
+            ...old.post,
+            likedByMe: nextLiked,
+            counts: { ...old.post.counts, likes: Math.max(0, (old.post.counts?.likes ?? 0) + delta) },
+          },
+        };
+      });
+
+      // Make sure post details refetches when needed
+      qc.invalidateQueries({ queryKey: ["post", postId] });
     },
     [qc]
   );
 
   const likePost = useCallback(
     async (postId: string, currentLiked: boolean) => {
+      if (!postId || postId === "undefined") return;
+
       const ok = await requireAuth(`/post/${postId}`);
       if (!ok) return;
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       const nextLiked = !currentLiked;
-      patchFeedLike(postId, nextLiked);
+
+      // ✅ optimistic
+      patchPostLikeEverywhere(postId, nextLiked);
 
       try {
-        await togglePostLike.mutateAsync({ postId, liked: currentLiked });
+        if (currentLiked) {
+          await apiFetch(`/api/likes`, { method: "DELETE", json: { postId } });
+        } else {
+          await apiFetch(`/api/likes`, { method: "POST", json: { postId } });
+        }
+
+        // ✅ confirm truth
+        await qc.invalidateQueries({ queryKey: ["feed"] });
+        await qc.invalidateQueries({ queryKey: ["post", postId] });
       } catch {
-        // onError already invalidates
+        // rollback via refetch
+        await qc.invalidateQueries({ queryKey: ["feed"] });
+        await qc.invalidateQueries({ queryKey: ["post", postId] });
+        refetch();
       }
     },
-    [patchFeedLike, togglePostLike]
+    [patchPostLikeEverywhere, qc, refetch]
   );
 
   const openAsk = useCallback(async () => {
@@ -667,23 +597,29 @@ export default function FeedScreen() {
           </Pressable>
         </View>
       ) : isEmpty ? (
-        <EmptyState filter={filter} onAsk={openAsk} headerOffset={headerOffset} tint={headerTint} />
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: headerOffset }}>
+          <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>No questions yet.</Text>
+        </View>
       ) : (
         <FlashList
           ref={listRef}
           data={filteredItems}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ReelItem
-              item={item}
-              height={height}
-              headerOffset={headerOffset}
-              onLike={() => likePost(item.id, !!item.likedByMe)}
-              onOpenPost={() => openPost(item.id)}
-              showCategoryChip={filter === "ALL"}
-              onSelectCategory={selectCategoryFromPost}
-            />
-          )}
+          renderItem={({ item }) => {
+            const liked = !!item.likedByMe;
+            return (
+              <ReelItem
+                item={item}
+                height={height}
+                headerOffset={headerOffset}
+                liked={liked}
+                onLike={() => likePost(item.id, liked)}
+                onOpenPost={() => openPost(item.id)}
+                showCategoryChip={filter === "ALL"}
+                onSelectCategory={selectCategoryFromPost}
+              />
+            );
+          }}
           pagingEnabled
           snapToInterval={height}
           snapToAlignment="start"

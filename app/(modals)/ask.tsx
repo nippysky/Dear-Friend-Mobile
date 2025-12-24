@@ -1,5 +1,6 @@
 // app/(modals)/ask.tsx
 import { Ionicons } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -157,6 +158,8 @@ export default function AskModal() {
   const { t } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const qc = useQueryClient();
+
   const createPost = useCreatePost();
 
   const [step, setStep] = useState<Step>("PICK");
@@ -176,7 +179,6 @@ export default function AskModal() {
     return trimmed.length >= MIN_POST_CHARS && trimmed.length <= MAX_POST_CHARS && !createPost.isPending;
   }, [trimmed.length, createPost.isPending]);
 
-  // Focus input when we enter compose step
   useEffect(() => {
     if (step !== "COMPOSE") return;
     const id = setTimeout(() => inputRef.current?.focus(), 220);
@@ -206,8 +208,11 @@ export default function AskModal() {
     }
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // ✅ create post, then go Home + refresh feed
     await createPost.mutateAsync({ category, body: trimmed });
-    router.back();
+    await qc.invalidateQueries({ queryKey: ["feed"] });
+    router.replace("/" as any);
   };
 
   const bgTint = withAlpha(catTint(t, category), 0.35);
@@ -219,7 +224,6 @@ export default function AskModal() {
     >
       <Pressable onPress={() => Keyboard.dismiss()} style={{ flex: 1 }} accessible={false}>
         <View style={{ flex: 1, paddingTop: insets.top + 10, paddingHorizontal: t.space[16] }}>
-          {/* Minimal top row */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Pressable
               onPress={() => router.back()}
@@ -236,7 +240,6 @@ export default function AskModal() {
             <View style={{ width: 44 }} />
           </View>
 
-          {/* Soft background wash */}
           <View
             style={{
               position: "absolute",
@@ -250,7 +253,6 @@ export default function AskModal() {
             pointerEvents="none"
           />
 
-          {/* STEP 1: Pick category bubbles (same fun layout, Career brought closer) */}
           {step === "PICK" ? (
             <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)} style={{ flex: 1 }}>
               <View style={{ marginTop: 26 }}>
@@ -294,7 +296,6 @@ export default function AskModal() {
                   style={{ position: "absolute", top: 140, right: 0 }}
                 />
 
-                {/* ✅ moved Career upward/closer so it “clusters” */}
                 <CategoryBubble
                   cat="CAREER"
                   label="Career"
@@ -331,15 +332,12 @@ export default function AskModal() {
             </Animated.View>
           ) : null}
 
-          {/* STEP 2: Compose (keep screen, but quiet entry animation) */}
           {step === "COMPOSE" ? (
             <Animated.View
-              // ✅ reduced the “loud bounce” — now fast, clean, subtle
               entering={SlideInDown.duration(150)}
               exiting={SlideOutDown.duration(120)}
               style={{ flex: 1, paddingTop: 18 }}
             >
-              {/* Category row */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                 <Pressable
                   onPress={goPick}
@@ -375,7 +373,6 @@ export default function AskModal() {
                 </View>
               </View>
 
-              {/* Input card */}
               <View
                 style={{
                   marginTop: 14,
@@ -430,7 +427,6 @@ export default function AskModal() {
                 ) : null}
               </View>
 
-              {/* Post button */}
               <Pressable
                 disabled={!canPost}
                 onPress={post}

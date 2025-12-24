@@ -29,7 +29,11 @@ export async function apiFetch<T>(
   };
 
   if (options.json) headers["Content-Type"] = "application/json";
-  if (tokens?.access_token) headers.Authorization = `Bearer ${tokens.access_token}`;
+ // If caller explicitly provided Authorization, don't override it.
+if (!headers.Authorization && tokens?.access_token) {
+  headers.Authorization = `Bearer ${tokens.access_token}`;
+}
+
 
   const doRequest = async () =>
     fetch(`${API_BASE_URL}${path}`, {

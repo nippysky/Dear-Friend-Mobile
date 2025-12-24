@@ -2,14 +2,11 @@
 import { router } from "expo-router";
 import { isAuthed } from "./authState";
 
-export async function requireAuth(nextPath: string) {
+export async function requireAuth(next: string) {
   const ok = await isAuthed();
   if (ok) return true;
 
-  router.push({
-    pathname: "/sign-in" as unknown as any,
-    params: { next: nextPath },
-  });
-
+  const encoded = encodeURIComponent(next);
+  router.push((`/sign-in?next=${encoded}`) as any);
   return false;
 }

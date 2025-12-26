@@ -1,7 +1,10 @@
+// app/sign-up.tsx
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,14 +13,119 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { apiFetch } from "../src/lib/api";
 import { signIn, signUp } from "../src/lib/authApi";
 import { useTheme } from "../src/theme/ThemeProvider";
 
-export default function SignUp() {
+function withAlpha(color: string, alpha: number) {
+  if (!color || typeof color !== "string") return color;
+  const a = Math.max(0, Math.min(1, alpha));
+  if (color.startsWith("rgba(") || color.startsWith("rgb(")) return color;
+
+  if (color.startsWith("#")) {
+    const hex = color.replace("#", "");
+    const expand = (s: string) => s.split("").map((ch) => ch + ch).join("");
+    const h = hex.length === 3 ? expand(hex) : hex;
+    if (h.length !== 6) return color;
+
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if ([r, g, b].some((n) => Number.isNaN(n))) return color;
+
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  return color;
+}
+
+function sanitizeUsername(raw: string) {
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "");
+}
+
+function passwordChecks(pw: string) {
+  return {
+    min: pw.length >= 8,
+    lower: /[a-z]/.test(pw),
+    upper: /[A-Z]/.test(pw),
+    number: /[0-9]/.test(pw),
+    special: /[^A-Za-z0-9]/.test(pw),
+  };
+}
+
+type AvailState = "idle" | "checking" | "available" | "taken" | "invalid" | "error";
+
+async function checkAvailability(kind: "username" | "email", value: string) {
+  const q = `?kind=${encodeURIComponent(kind)}&value=${encodeURIComponent(value)}`;
+  return apiFetch<{ available: boolean; reason?: string }>(`/api/auth/check${q}`, { method: "GET" });
+}
+
+function StatusRow({
+  state,
+  okText,
+  badText,
+}: {
+  state: AvailState;
+  okText: string;
+  badText: string;
+}) {
+  const { t } = useTheme();
+
+  const icon =
+    state === "checking"
+      ? null
+      : state === "available"
+      ? "checkmark-circle"
+      : state === "taken" || state === "invalid" || state === "error"
+      ? "close-circle"
+      : null;
+
+  const text =
+    state === "checking"
+      ? "Checking…"
+      : state === "available"
+      ? okText
+      : state === "taken"
+      ? badText
+      : state === "invalid"
+      ? "Invalid"
+      : state === "error"
+      ? "Couldn’t check"
+      : "";
+
+  const color =
+    state === "available"
+      ? "#2F7D6D"
+      : state === "taken" || state === "invalid" || state === "error"
+      ? "#B42318"
+      : t.color.textMuted;
+
+  if (state === "idle") return null;
+
+  return (
+    <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {state === "checking" ? <ActivityIndicator /> : icon ? <Ionicons name={icon as any} size={16} color={color} /> : null}
+      <Text style={{ color, fontWeight: "800" }}>{text}</Text>
+    </View>
+  );
+}
+
+function RuleRow({ ok, label }: { ok: boolean; label: string }) {
+  const { t } = useTheme();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
+      <Ionicons name={ok ? "checkmark-circle" : "ellipse-outline"} size={16} color={ok ? "#2F7D6D" : t.color.textMuted} />
+      <Text style={{ color: ok ? t.color.text : t.color.textMuted, fontWeight: "800" }}>{label}</Text>
+    </View>
+  );
+}
+
+export default function SignUpScreen() {
   const { t } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
+  const userRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const passRef = useRef<TextInput>(null);
 
@@ -28,28 +136,149 @@ export default function SignUp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const valid = useMemo(() => {
-    const u = username.trim();
-    return (
-      u.length >= 3 &&
-      /^[a-zA-Z0-9_]+$/.test(u) &&
-      email.trim().includes("@") &&
-      password.length >= 8 &&
-      !busy
-    );
-  }, [username, email, password, busy]);
+  const [showPassword, setShowPassword] = useState(false);
+  const [userFocused, setUserFocused] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passFocused, setPassFocused] = useState(false);
+
+  const usernameClean = useMemo(() => sanitizeUsername(username.trim()), [username]);
+  const emailTrim = useMemo(() => email.trim().toLowerCase(), [email]);
+
+  const usernameFormatOk = useMemo(() => {
+    if (usernameClean.length < 3 || usernameClean.length > 20) return false;
+    return /^[a-z0-9_]+$/.test(usernameClean);
+  }, [usernameClean]);
+
+  const emailFormatOk = useMemo(() => emailTrim.includes("@") && emailTrim.includes("."), [emailTrim]);
+
+  const pw = useMemo(() => passwordChecks(password), [password]);
+  const passwordOk = pw.min && pw.lower && pw.upper && pw.number && pw.special;
+
+  // Availability states (debounced)
+  const [userAvail, setUserAvail] = useState<AvailState>("idle");
+  const [emailAvail, setEmailAvail] = useState<AvailState>("idle");
+
+  useEffect(() => {
+    let timer: any;
+
+    if (!usernameClean) {
+      setUserAvail("idle");
+      return;
+    }
+
+    if (!usernameFormatOk) {
+      setUserAvail("invalid");
+      return;
+    }
+
+    setUserAvail("checking");
+    timer = setTimeout(async () => {
+      try {
+        const res = await checkAvailability("username", usernameClean);
+        setUserAvail(res.available ? "available" : "taken");
+      } catch {
+        setUserAvail("error");
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [usernameClean, usernameFormatOk]);
+
+  useEffect(() => {
+    let timer: any;
+
+    if (!emailTrim) {
+      setEmailAvail("idle");
+      return;
+    }
+
+    if (!emailFormatOk) {
+      setEmailAvail("invalid");
+      return;
+    }
+
+    setEmailAvail("checking");
+    timer = setTimeout(async () => {
+      try {
+        const res = await checkAvailability("email", emailTrim);
+        setEmailAvail(res.available ? "available" : "taken");
+      } catch {
+        setEmailAvail("error");
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [emailTrim, emailFormatOk]);
+
+  const canSubmit = useMemo(() => {
+    if (busy) return false;
+    if (!usernameFormatOk || userAvail !== "available") return false;
+    if (!emailFormatOk || emailAvail !== "available") return false;
+    if (!passwordOk) return false;
+    return true;
+  }, [busy, usernameFormatOk, userAvail, emailFormatOk, emailAvail, passwordOk]);
+
+  const inputCardStyle = (focused: boolean) => ({
+    backgroundColor: withAlpha(t.color.surface, 0.96),
+    borderWidth: 1,
+    borderColor: focused ? withAlpha(t.color.text, 0.35) : withAlpha(t.color.border, 0.95),
+    borderRadius: t.radius.xl,
+    paddingHorizontal: t.space[16],
+    paddingVertical: 14,
+  });
+
+  const labelStyle = {
+    color: t.color.textMuted,
+    fontSize: t.text.sm,
+    fontWeight: "800" as const,
+    letterSpacing: -0.1,
+  };
+
+  const primaryButtonStyle = (pressed: boolean) => ({
+    marginTop: 8,
+    height: 52,
+    borderRadius: t.radius.pill,
+    backgroundColor: canSubmit ? t.color.accent : withAlpha(t.color.border, 1),
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    flexDirection: "row" as const,
+    gap: 10,
+    opacity: pressed ? 0.95 : 1,
+    borderWidth: 1,
+    borderColor: canSubmit ? "rgba(255,255,255,0.18)" : withAlpha(t.color.border, 1),
+    shadowOpacity: canSubmit ? 0.18 : 0,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: canSubmit ? 6 : 0,
+  });
+
+  const secondaryButtonStyle = (pressed: boolean) => ({
+    height: 52,
+    borderRadius: t.radius.pill,
+    backgroundColor: withAlpha(t.color.surface, 0.78),
+    borderWidth: 1,
+    borderColor: withAlpha(t.color.border, 0.95),
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    opacity: pressed ? 0.92 : 1,
+  });
 
   const onSubmit = async () => {
-    if (!valid) return;
+    if (!canSubmit) return;
+
     setError(null);
     setBusy(true);
+
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await signUp({ username: username.trim(), email: email.trim(), password });
-      await signIn({ email: email.trim(), password });
+
+      await signUp({ username: usernameClean, email: emailTrim, password });
+      await signIn({ email: emailTrim, password });
+
       router.replace("/" as any);
     } catch (e: any) {
       setError(e?.message ?? "Sign up failed");
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setBusy(false);
     }
@@ -59,132 +288,231 @@ export default function SignUp() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.color.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
     >
-      <View
-        style={{
-          flex: 1,
-          paddingHorizontal: t.space[16],
-          paddingTop: insets.top + 24,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: t.text["2xl"],
-            fontWeight: "900",
-            color: t.color.text,
-            letterSpacing: -0.8,
-          }}
-        >
-          Create account
-        </Text>
-        <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "600" }}>
-          Just email + password. No social logins.
-        </Text>
+      <View style={{ flex: 1, paddingTop: insets.top + 18, paddingBottom: insets.bottom + 16 }}>
+        <View style={{ paddingHorizontal: t.space[16], marginTop: 6 }}>
+          <Text style={{ fontSize: 36, lineHeight: 40, fontWeight: "900", color: t.color.text, letterSpacing: -1.1 }}>
+            Create account
+          </Text>
+          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+            Just email + password. No social logins.
+          </Text>
+        </View>
 
-        <View style={{ marginTop: 18, gap: 12 }}>
-          <View
-            style={{
-              backgroundColor: t.color.surface,
-              borderWidth: 1,
-              borderColor: t.color.border,
-              borderRadius: t.radius.xl,
-              padding: t.space[16],
-            }}
-          >
-            <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "700" }}>
-              Username
+        <View style={{ paddingHorizontal: t.space[16], marginTop: 18, gap: 12 }}>
+          {/* Username */}
+          <View style={inputCardStyle(userFocused)}>
+            <Text style={labelStyle}>Username</Text>
+
+            <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: withAlpha(t.color.surfaceAlt, 0.92),
+                  borderWidth: 1,
+                  borderColor: withAlpha(t.color.border, 0.95),
+                }}
+              >
+                <Ionicons name="at-outline" size={18} color={t.color.textMuted} />
+              </View>
+
+              <TextInput
+                ref={userRef}
+                value={username}
+                onChangeText={(v) => setUsername(sanitizeUsername(v))}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => emailRef.current?.focus()}
+                placeholder="e.g. nippy_01"
+                placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
+                onFocus={() => setUserFocused(true)}
+                onBlur={() => setUserFocused(false)}
+                style={{
+                  flex: 1,
+                  color: t.color.text,
+                  fontSize: t.text.md,
+                  fontWeight: "900",
+                  letterSpacing: -0.2,
+                  paddingVertical: 6,
+                }}
+              />
+            </View>
+
+            <Text style={{ marginTop: 8, color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "700" }}>
+              3–20 chars. Letters, numbers, underscore.
             </Text>
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="next"
-              onSubmitEditing={() => emailRef.current?.focus()}
-              placeholder="e.g. nippy_01"
-              placeholderTextColor={t.color.textMuted}
-              style={{ marginTop: 8, color: t.color.text, fontSize: t.text.md, fontWeight: "700" }}
-            />
-            <Text style={{ marginTop: 6, color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "700" }}>
-              Letters, numbers, underscore.
-            </Text>
+
+            <StatusRow state={userAvail} okText="Username available" badText="Username taken" />
           </View>
 
-          <View
-            style={{
-              backgroundColor: t.color.surface,
-              borderWidth: 1,
-              borderColor: t.color.border,
-              borderRadius: t.radius.xl,
-              padding: t.space[16],
-            }}
-          >
-            <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "700" }}>
-              Email
-            </Text>
-            <TextInput
-              ref={emailRef}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              returnKeyType="next"
-              onSubmitEditing={() => passRef.current?.focus()}
-              placeholder="you@example.com"
-              placeholderTextColor={t.color.textMuted}
-              style={{ marginTop: 8, color: t.color.text, fontSize: t.text.md, fontWeight: "700" }}
-            />
+          {/* Email */}
+          <View style={inputCardStyle(emailFocused)}>
+            <Text style={labelStyle}>Email</Text>
+
+            <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: withAlpha(t.color.surfaceAlt, 0.92),
+                  borderWidth: 1,
+                  borderColor: withAlpha(t.color.border, 0.95),
+                }}
+              >
+                <Ionicons name="mail-outline" size={18} color={t.color.textMuted} />
+              </View>
+
+              <TextInput
+                ref={emailRef}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                returnKeyType="next"
+                onSubmitEditing={() => passRef.current?.focus()}
+                placeholder="you@example.com"
+                placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
+                style={{
+                  flex: 1,
+                  color: t.color.text,
+                  fontSize: t.text.md,
+                  fontWeight: "800",
+                  letterSpacing: -0.2,
+                  paddingVertical: 6,
+                }}
+              />
+            </View>
+
+            <StatusRow state={emailAvail} okText="Email available" badText="Email already in use" />
           </View>
 
-          <View
-            style={{
-              backgroundColor: t.color.surface,
-              borderWidth: 1,
-              borderColor: t.color.border,
-              borderRadius: t.radius.xl,
-              padding: t.space[16],
-            }}
-          >
-            <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "700" }}>
-              Password
-            </Text>
-            <TextInput
-              ref={passRef}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              returnKeyType="go"
-              onSubmitEditing={onSubmit}
-              placeholder="8+ characters"
-              placeholderTextColor={t.color.textMuted}
-              style={{ marginTop: 8, color: t.color.text, fontSize: t.text.md, fontWeight: "700" }}
-            />
+          {/* Password */}
+          <View style={inputCardStyle(passFocused)}>
+            <Text style={labelStyle}>Password</Text>
+
+            <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: withAlpha(t.color.surfaceAlt, 0.92),
+                  borderWidth: 1,
+                  borderColor: withAlpha(t.color.border, 0.95),
+                }}
+              >
+                <Ionicons name="lock-closed-outline" size={18} color={t.color.textMuted} />
+              </View>
+
+              <TextInput
+                ref={passRef}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                returnKeyType="go"
+                onSubmitEditing={onSubmit}
+                placeholder="Create a strong password"
+                placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
+                onFocus={() => setPassFocused(true)}
+                onBlur={() => setPassFocused(false)}
+                style={{
+                  flex: 1,
+                  color: t.color.text,
+                  fontSize: t.text.md,
+                  fontWeight: "900",
+                  letterSpacing: 0.2,
+                  paddingVertical: 6,
+                }}
+              />
+
+              <Pressable
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowPassword((v) => !v);
+                }}
+                hitSlop={12}
+                style={({ pressed }) => ({
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: withAlpha(t.color.surface, 0.9),
+                  borderWidth: 1,
+                  borderColor: withAlpha(t.color.border, 0.95),
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={18}
+                  color={t.color.textMuted}
+                />
+              </Pressable>
+            </View>
+
+            {/* ✅ Live rules checklist */}
+            <View style={{ marginTop: 10 }}>
+              <RuleRow ok={pw.min} label="At least 8 characters" />
+              <RuleRow ok={pw.upper} label="One uppercase letter" />
+              <RuleRow ok={pw.lower} label="One lowercase letter" />
+              <RuleRow ok={pw.number} label="One number" />
+              <RuleRow ok={pw.special} label="One special character" />
+            </View>
           </View>
 
-          {error ? <Text style={{ color: "#B42318", fontWeight: "800" }}>{error}</Text> : null}
+          {error ? (
+            <View
+              style={{
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: "rgba(180,35,24,0.25)",
+                backgroundColor: "rgba(180,35,24,0.08)",
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+              }}
+            >
+              <Text style={{ color: "#B42318", fontWeight: "900" }}>{error}</Text>
+            </View>
+          ) : null}
 
-          <Pressable
-            onPress={onSubmit}
-            disabled={!valid}
-            style={({ pressed }) => ({
-              marginTop: 4,
-              paddingVertical: 14,
-              borderRadius: t.radius.pill,
-              backgroundColor: valid ? t.color.accent : t.color.border,
-              alignItems: "center",
-              opacity: pressed ? 0.95 : 1,
-            })}
-          >
-            <Text style={{ color: t.color.textOnAccent, fontWeight: "900", fontSize: t.text.md }}>
+          {/* Create */}
+          <Pressable onPress={onSubmit} disabled={!canSubmit} style={({ pressed }) => primaryButtonStyle(pressed)}>
+            {busy ? <ActivityIndicator /> : null}
+            <Text
+              style={{
+                color: canSubmit ? t.color.textOnAccent : t.color.textMuted,
+                fontWeight: "900",
+                fontSize: t.text.md,
+              }}
+            >
               {busy ? "Creating..." : "Create account"}
             </Text>
           </Pressable>
 
-          <Pressable onPress={() => router.back()} style={{ alignItems: "center", paddingVertical: 10 }}>
-            <Text style={{ color: t.color.accent, fontWeight: "900" }}>
-              I already have an account
-            </Text>
+          {/* Back */}
+          <Pressable
+            onPress={async () => {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.back();
+            }}
+            style={({ pressed }) => secondaryButtonStyle(pressed)}
+          >
+            <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md }}>I already have an account</Text>
           </Pressable>
         </View>
       </View>

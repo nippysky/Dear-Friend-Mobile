@@ -1,33 +1,22 @@
 // app/index.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useFeed } from "../src/hooks/useFeed";
+import { useFeed, type FeedFilter, type FeedItem, type FeedPage } from "../src/hooks/useFeed";
 import { apiFetch } from "../src/lib/api";
 import { requireAuth } from "../src/lib/requireAuth";
+import { clearTokens } from "../src/lib/session";
 import { useTheme } from "../src/theme/ThemeProvider";
 
-type FeedItem = {
-  id: string;
-  category: "PERSONAL" | "RELATIONSHIP" | "CAREER";
-  body: string;
-  createdAt: string;
-  author: { id: string; username: string; displayName: string | null };
-  counts: { replies: number; likes: number };
-  pinnedReplyId: string | null;
-  likedByMe?: boolean; // ✅ now returned by API
-};
-
-type FeedFilter = "ALL" | FeedItem["category"];
-
-const PREVIEW_CHARS = 220;
+const PREVIEW_CHARS = 140;
 const HEADER_HEIGHT = 52;
 
 function categoryLabel(c: FeedItem["category"]) {
@@ -129,9 +118,10 @@ function StickyHeader({
         left: 0,
         right: 0,
         paddingTop: insets.top,
-        backgroundColor: withAlpha(tint, 0.55),
+        // ✅ SOLID header; never see content underneath
+        backgroundColor: tint,
         borderBottomWidth: 1,
-        borderBottomColor: withAlpha(t.color.border, 0.65),
+        borderBottomColor: withAlpha(t.color.border, 0.85),
         zIndex: 20,
       }}
     >
@@ -215,7 +205,13 @@ function IconAction({
       >
         <Ionicons name={icon} size={20} color={accent ? t.color.accent : t.color.text} />
       </View>
-      <Text style={{ marginTop: 6, fontSize: t.text.xs, fontWeight: "600", color: t.color.textMuted }}>{label}</Text>
+
+      {/* ✅ fixed height prevents layout reflow */}
+      <View style={{ height: 18, marginTop: 6, justifyContent: "center" }}>
+        <Text style={{ fontSize: t.text.xs, fontWeight: "600", color: t.color.textMuted }} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -293,6 +289,101 @@ function CategoryChip({ label, onPress }: { label: string; onPress: () => void }
     >
       <Text style={{ color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "600" }}>{label}</Text>
     </Pressable>
+  );
+}
+
+function EmptyState({
+  title,
+  subtitle,
+  primaryLabel,
+  onPrimary,
+  secondaryLabel,
+  onSecondary,
+}: {
+  title: string;
+  subtitle: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+}) {
+  const { t } = useTheme();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: t.space[16], paddingTop: insets.top + 84 }}>
+      <View
+        style={{
+          borderRadius: t.radius.xl,
+          borderWidth: 1,
+          borderColor: t.color.border,
+          backgroundColor: withAlpha(t.color.surface, 0.92),
+          padding: t.space[16],
+        }}
+      >
+        <View
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: 26,
+            backgroundColor: withAlpha(t.color.accentSoft ?? t.color.surfaceAlt, 0.85),
+            borderWidth: 1,
+            borderColor: withAlpha(t.color.border, 0.75),
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="sparkles-outline" size={22} color={t.color.text} />
+        </View>
+
+        <Text style={{ marginTop: 14, fontSize: t.text.lg, fontWeight: "900", color: t.color.text, letterSpacing: -0.4 }}>
+          {title}
+        </Text>
+        <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+          {subtitle}
+        </Text>
+
+        <View style={{ marginTop: 14, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+          <Pressable
+            onPress={onPrimary}
+            style={({ pressed }) => ({
+              paddingHorizontal: 14,
+              paddingVertical: 11,
+              borderRadius: t.radius.pill,
+              backgroundColor: t.color.accent,
+              opacity: pressed ? 0.9 : 1,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            })}
+          >
+            <Ionicons name="add" size={16} color={t.color.textOnAccent} />
+            <Text style={{ fontWeight: "900", color: t.color.textOnAccent }}>{primaryLabel}</Text>
+          </Pressable>
+
+          {secondaryLabel && onSecondary ? (
+            <Pressable
+              onPress={onSecondary}
+              style={({ pressed }) => ({
+                paddingHorizontal: 14,
+                paddingVertical: 11,
+                borderRadius: t.radius.pill,
+                backgroundColor: t.color.surfaceAlt,
+                borderWidth: 1,
+                borderColor: t.color.border,
+                opacity: pressed ? 0.9 : 1,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              })}
+            >
+              <Ionicons name="grid-outline" size={16} color={t.color.text} />
+              <Text style={{ fontWeight: "900", color: t.color.text }}>{secondaryLabel}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -392,41 +483,50 @@ export default function FeedScreen() {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
+  const pageHeight = useMemo(() => Math.round(height), [height]);
   const headerOffset = insets.top + HEADER_HEIGHT + 18;
+
   const listRef = useRef<FlashListRef<FeedItem> | null>(null);
-
-  const { data, isLoading, isError, error, refetch } = useFeed();
-
-  const items = useMemo(() => {
-    const raw = (data?.items ?? []) as FeedItem[];
-    return raw.filter((x) => x && typeof x.id === "string" && x.id.length > 0 && x.id !== "undefined");
-  }, [data]);
 
   const [filter, setFilter] = useState<FeedFilter>("ALL");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [headerTint, setHeaderTint] = useState<string>(t.color.bg);
 
-  const filteredItems = useMemo(() => {
-    if (filter === "ALL") return items;
-    return items.filter((x) => x.category === filter);
-  }, [items, filter]);
+  const { data, isPending, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useFeed(filter);
+
+  const items = useMemo(() => {
+    const pages = data?.pages ?? [];
+    const flat = pages.flatMap((p) => (Array.isArray(p.items) ? p.items : []));
+    return flat.filter((x) => x && typeof x.id === "string" && x.id.length > 0 && x.id !== "undefined");
+  }, [data]);
 
   const computeHeaderTint = useCallback(
     (idx: number) => {
-      if (filter === "ALL") {
-        const it = filteredItems[idx];
-        return it ? categoryTint(t, it.category) : t.color.bg;
-      }
-      return categoryTint(t, filter);
+      const it = items[idx];
+      return it ? categoryTint(t, it.category) : t.color.bg;
     },
-    [filter, filteredItems, t]
+    [items, t]
   );
 
-  const [headerTint, setHeaderTint] = useState<string>(t.color.bg);
-
   useEffect(() => {
-    setHeaderTint(computeHeaderTint(0));
     setActiveIndex(0);
-  }, [computeHeaderTint]);
+    setHeaderTint(computeHeaderTint(0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
+  // ✅ Pull-to-refresh spinner
+  const [refreshing, setRefreshing] = useState(false);
+  const onPullRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetch();
+      setActiveIndex(0);
+      setHeaderTint(computeHeaderTint(0));
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [computeHeaderTint, refetch]);
 
   const openPost = useCallback(
     (id: string, focus?: "reply") => {
@@ -436,65 +536,68 @@ export default function FeedScreen() {
     [router]
   );
 
-  // ✅ hard-sync helper: patch feed + patch post cache (if present) + invalidate post
-  const patchPostLikeEverywhere = useCallback(
+  // silent auth lock
+  const authLockRef = useRef(false);
+  const ensureAuthed = useCallback(async (nextPath: string) => {
+    if (authLockRef.current) return false;
+    authLockRef.current = true;
+    try {
+      return await requireAuth(nextPath);
+    } finally {
+      authLockRef.current = false;
+    }
+  }, []);
+
+  const redirectToSignIn = useCallback(
+    (nextPath: string) => {
+      const encoded = encodeURIComponent(nextPath);
+      router.push((`/sign-in?next=${encoded}`) as any);
+    },
+    [router]
+  );
+
+  // optimistic like patch across infinite pages
+  const patchFeedLike = useCallback(
     (postId: string, nextLiked: boolean) => {
-      // Patch FEED
-      qc.setQueryData(["feed"], (old: unknown) => {
-        if (!old || typeof old !== "object") return old;
-        const o = old as { items?: FeedItem[] };
-        if (!Array.isArray(o.items)) return old;
+      qc.setQueryData(["feed", filter], (old: unknown) => {
+        const o = old as InfiniteData<FeedPage> | undefined;
+        if (!o?.pages) return old;
 
-        const nextItems = o.items.map((it) => {
-          if (!it || it.id !== postId) return it;
-          const cur = !!it.likedByMe;
-          const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
+        const nextPages = o.pages.map((pg) => {
+          const nextItems = pg.items.map((it) => {
+            if (it.id !== postId) return it;
 
-          return {
-            ...it,
-            likedByMe: nextLiked,
-            counts: { ...it.counts, likes: Math.max(0, (it.counts?.likes ?? 0) + delta) },
-          };
+            const cur = !!it.likedByMe;
+            const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
+
+            return {
+              ...it,
+              likedByMe: nextLiked,
+              counts: { ...it.counts, likes: Math.max(0, (it.counts?.likes ?? 0) + delta) },
+            };
+          });
+
+          return { ...pg, items: nextItems };
         });
 
-        return { ...o, items: nextItems };
+        return { ...o, pages: nextPages };
       });
-
-      // Patch POST DETAIL (only if it already exists in cache)
-      qc.setQueryData(["post", postId], (old: any) => {
-        if (!old?.post) return old;
-        const cur = !!old.post.likedByMe;
-        const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
-
-        return {
-          ...old,
-          post: {
-            ...old.post,
-            likedByMe: nextLiked,
-            counts: { ...old.post.counts, likes: Math.max(0, (old.post.counts?.likes ?? 0) + delta) },
-          },
-        };
-      });
-
-      // Make sure post details refetches when needed
-      qc.invalidateQueries({ queryKey: ["post", postId] });
     },
-    [qc]
+    [filter, qc]
   );
 
   const likePost = useCallback(
     async (postId: string, currentLiked: boolean) => {
       if (!postId || postId === "undefined") return;
 
-      const ok = await requireAuth(`/post/${postId}`);
+      const nextPath = `/post/${postId}`;
+      const ok = await ensureAuthed(nextPath);
       if (!ok) return;
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       const nextLiked = !currentLiked;
-
-      // ✅ optimistic
-      patchPostLikeEverywhere(postId, nextLiked);
+      patchFeedLike(postId, nextLiked);
 
       try {
         if (currentLiked) {
@@ -502,51 +605,61 @@ export default function FeedScreen() {
         } else {
           await apiFetch(`/api/likes`, { method: "POST", json: { postId } });
         }
-
-        // ✅ confirm truth
-        await qc.invalidateQueries({ queryKey: ["feed"] });
-        await qc.invalidateQueries({ queryKey: ["post", postId] });
-      } catch {
-        // rollback via refetch
-        await qc.invalidateQueries({ queryKey: ["feed"] });
-        await qc.invalidateQueries({ queryKey: ["post", postId] });
-        refetch();
+        // don’t force feed refetch immediately (prevents “revert” + jitter)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "";
+        if (/session expired/i.test(msg)) {
+          await clearTokens();
+          redirectToSignIn(nextPath);
+          return;
+        }
+        // rollback
+        patchFeedLike(postId, currentLiked);
       }
     },
-    [patchPostLikeEverywhere, qc, refetch]
+    [ensureAuthed, patchFeedLike, redirectToSignIn]
   );
 
   const openAsk = useCallback(async () => {
-    const ok = await requireAuth("/(modals)/ask");
+    const nextPath = "/(modals)/ask";
+    const ok = await ensureAuthed(nextPath);
     if (!ok) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push("/(modals)/ask" as any);
-  }, [router]);
+  }, [ensureAuthed, router]);
+
+  const openProfile = useCallback(async () => {
+    const nextPath = "/profile";
+    const ok = await ensureAuthed(nextPath);
+    if (!ok) return;
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push("/profile" as any);
+  }, [ensureAuthed, router]);
 
   const setFilterAndReset = useCallback(
     async (next: FeedFilter) => {
       setFilter(next);
       setActiveIndex(0);
-
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      });
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
     },
     []
   );
 
   const onMomentumScrollEnd = useCallback(
-    (e: any) => {
-      const y = e?.nativeEvent?.contentOffset?.y ?? 0;
-      const idx = Math.max(0, Math.round(y / height));
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = e.nativeEvent.contentOffset.y ?? 0;
+      const idx = Math.max(0, Math.round(y / pageHeight));
       if (idx === activeIndex) return;
 
       setActiveIndex(idx);
       setHeaderTint(computeHeaderTint(idx));
+
+      if (hasNextPage && !isFetchingNextPage && idx >= items.length - 6) {
+        fetchNextPage();
+      }
     },
-    [activeIndex, computeHeaderTint, height]
+    [activeIndex, computeHeaderTint, fetchNextPage, hasNextPage, isFetchingNextPage, items.length, pageHeight]
   );
 
   const selectCategoryFromPost = useCallback(
@@ -556,20 +669,15 @@ export default function FeedScreen() {
     [setFilterAndReset]
   );
 
-  const isEmpty = !isLoading && !isError && filteredItems.length === 0;
+  const isEmpty = !isPending && !isError && items.length === 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.color.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <StickyHeader
-        active={filter}
-        setActive={setFilterAndReset}
-        onProfile={() => router.push("/profile" as any)}
-        tint={headerTint}
-      />
+      <StickyHeader active={filter} setActive={setFilterAndReset} onProfile={openProfile} tint={headerTint} />
 
-      {isLoading ? (
+      {isPending ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator />
         </View>
@@ -577,7 +685,7 @@ export default function FeedScreen() {
         <View style={{ flex: 1, padding: t.space[16], justifyContent: "center" }}>
           <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.lg }}>Couldn’t load feed</Text>
           <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "600" }}>
-            {(error as Error).message}
+            {(error as Error)?.message ?? "Unknown error"}
           </Text>
 
           <Pressable
@@ -597,20 +705,29 @@ export default function FeedScreen() {
           </Pressable>
         </View>
       ) : isEmpty ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: headerOffset }}>
-          <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>No questions yet.</Text>
-        </View>
+        <EmptyState
+          title={filter === "ALL" ? "No questions yet" : `No ${categoryLabel(filter)} questions yet`}
+          subtitle={
+            filter === "ALL"
+              ? "Ask something real. Keep it simple. Let people help."
+              : "This category is quiet right now. You can ask something, or switch back to All."
+          }
+          primaryLabel="Ask"
+          onPrimary={openAsk}
+          secondaryLabel={filter === "ALL" ? undefined : "View All"}
+          onSecondary={filter === "ALL" ? undefined : () => setFilterAndReset("ALL")}
+        />
       ) : (
         <FlashList
           ref={listRef}
-          data={filteredItems}
+          data={items}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
             const liked = !!item.likedByMe;
             return (
               <ReelItem
                 item={item}
-                height={height}
+                height={pageHeight}
                 headerOffset={headerOffset}
                 liked={liked}
                 onLike={() => likePost(item.id, liked)}
@@ -621,15 +738,16 @@ export default function FeedScreen() {
             );
           }}
           pagingEnabled
-          snapToInterval={height}
+          snapToInterval={pageHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           disableIntervalMomentum
           showsVerticalScrollIndicator={false}
-          drawDistance={height * 2}
-          onRefresh={refetch}
-          refreshing={false}
+          drawDistance={pageHeight * 2}
           onMomentumScrollEnd={onMomentumScrollEnd}
+          // ✅ Pull to refresh (shows indicator)
+          onRefresh={onPullRefresh}
+          refreshing={refreshing}
         />
       )}
 

@@ -10,7 +10,7 @@ export const lightTokens = {
     accent: "#0B1220",
     // accent: "#2F7D6D",
     accentSoft: "#E6F2EF",
-    blush: "#E8B4A8",
+    blush: "#E53935",
     blushSoft: "#F6E3DE",
   },
   radius: { sm: 10, md: 14, lg: 18, xl: 24, pill: 9999 },

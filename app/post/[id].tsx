@@ -1,13 +1,16 @@
 // app/post/[id].tsx
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AlertButton, ViewToken } from "react-native";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,14 +19,17 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ReportModal } from "../../src/components/moderation/ReportModal";
 import { AppText } from "../../src/components/ui/AppText";
 import { useCreateReply } from "../../src/hooks/useCreateReply";
 import type { FeedPage } from "../../src/hooks/useFeed";
 import { usePost } from "../../src/hooks/usePost";
 import { useToggleLike } from "../../src/hooks/useToggleLike";
-import { apiFetch } from "../../src/lib/api";
+import { ApiError, apiFetch } from "../../src/lib/api";
 import { isAuthed } from "../../src/lib/authState";
+import { blockUser, pinReply, reportPost, reportReply } from "../../src/lib/moderationApi";
 import { requireAuth } from "../../src/lib/requireAuth";
+import { getTokens } from "../../src/lib/session";
 import { useTheme } from "../../src/theme/ThemeProvider";
 
 function isUuid(v: string) {
@@ -52,6 +58,24 @@ function withAlpha(color: string, alpha: number) {
   return color;
 }
 
+// ✅ local “who am I?” helper (works even if backend forgets isMine)
+function decodeJwtSub(accessToken: string): string | null {
+  try {
+    const parts = accessToken.split(".");
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+
+    const json = globalThis.atob(padded);
+    const obj = JSON.parse(json);
+    return typeof obj?.sub === "string" ? obj.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 type Cat = "PERSONAL" | "RELATIONSHIP" | "CAREER";
 
 function categoryLabel(c: Cat) {
@@ -67,7 +91,6 @@ function categoryTint(t: any, c: Cat) {
 }
 
 function titleSizing(body: string) {
-  // Keep it calm (closer to web): lighter + slightly smaller than before.
   const len = body.trim().length;
   if (len <= 70) return { fontSize: 22, lineHeight: 28 };
   if (len <= 140) return { fontSize: 20, lineHeight: 26 };
@@ -133,23 +156,98 @@ function IconChip({
   );
 }
 
+function MostHelpfulBadge() {
+  const { t } = useTheme();
+  return (
+    <View
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: withAlpha(t.color.surfaceAlt, 0.75),
+        borderWidth: 1,
+        borderColor: withAlpha(t.color.border, 0.9),
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      <Ionicons name="sparkles-outline" size={14} color={t.color.text} />
+      <AppText variant="label" weight="semibold" style={{ color: t.color.text }}>
+        Most helpful
+      </AppText>
+    </View>
+  );
+}
+
 type PostShape = {
   id: string;
   category: Cat;
   body: string;
   likedByMe: boolean;
-  author: { username: string };
+  pinnedReplyId: string | null;
+  isMine: boolean;
+  author: { id: string; username: string; displayName: string | null };
   counts: { likes: number; replies: number };
 };
 
 type ReplyItem = {
   id: string;
   body: string;
-  isPinned?: boolean;
+  isPinned: boolean;
   likedByMe: boolean;
   author: { id: string; username: string; displayName: string | null };
   counts: { likes: number };
+  isMine?: boolean; // optional if API adds it later
 };
+
+type MenuAction = { label: string; onPress: () => void; destructive?: boolean };
+
+function showMenu(title: string, actions: MenuAction[]) {
+  const labels = [...actions.map((a) => a.label), "Cancel"];
+  const cancelIndex = labels.length - 1;
+  const destructiveIndex = actions.findIndex((a) => a.destructive);
+
+  if (Platform.OS === "ios") {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title,
+        options: labels,
+        cancelButtonIndex: cancelIndex,
+        destructiveButtonIndex: destructiveIndex >= 0 ? destructiveIndex : undefined,
+        userInterfaceStyle: "light",
+      },
+      (idx) => {
+        if (idx === cancelIndex) return;
+        actions[idx]?.onPress?.();
+      }
+    );
+    return;
+  }
+
+  Alert.alert(
+    title,
+    undefined,
+    [
+      ...actions.map(
+        (a): AlertButton => ({
+          text: a.label,
+          style: (a.destructive ? "destructive" : "default") as AlertButton["style"],
+          onPress: a.onPress,
+        })
+      ),
+      { text: "Cancel", style: "cancel" as AlertButton["style"] },
+    ],
+    { cancelable: true }
+  );
+}
+
+function sortRepliesPinnedFirst(list: ReplyItem[]) {
+  if (!list.length) return list;
+  const pinned = list.find((r) => r.isPinned);
+  const rest = list.filter((r) => !r.isPinned);
+  return pinned ? [pinned, ...rest] : rest;
+}
 
 export default function PostDetail() {
   const { t } = useTheme();
@@ -165,14 +263,48 @@ export default function PostDetail() {
   const validPostId = !!postId && isUuid(postId);
 
   const { data, isLoading, isError, error, refetch } = usePost(postId, { enabled: validPostId });
+
   const post = (data?.post ?? null) as PostShape | null;
-  const replies = (data?.replies ?? []) as ReplyItem[];
+
+  const replies = useMemo(() => ((data?.replies ?? []) as ReplyItem[]), [data?.replies]);
+
+  // ordering stays derived so UI updates immediately on optimistic pin
+  const orderedReplies = useMemo(() => sortRepliesPinnedFirst(replies), [replies]);
 
   const tint = post ? categoryTint(t, post.category) : t.color.bg;
+
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const tokens = await getTokens();
+      const sub = tokens?.access_token ? decodeJwtSub(tokens.access_token) : null;
+      if (alive) setViewerId(sub);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const isMyReply = useCallback(
+    (item: ReplyItem) => {
+      if (item.isMine === true) return true;
+      if (!viewerId) return false;
+      return item?.author?.id === viewerId;
+    },
+    [viewerId]
+  );
 
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [reply, setReply] = useState("");
   const inputRef = useRef<TextInput>(null);
+
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ kind: "post" | "reply"; id: string; handle: string } | null>(
+    null
+  );
 
   useEffect(() => {
     isAuthed().then(setAuthed);
@@ -185,14 +317,30 @@ export default function PostDetail() {
     }
   }, [focus, authed]);
 
-  const createReply = useCreateReply(postId);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(id);
+  }, [toast]);
 
-  // hook for post likes
+  // ✅ prevent “screen drag” when pin/unpin reorders items
+  const listRef = useRef<FlashListRef<ReplyItem> | null>(null);
+  const firstVisibleReplyIdRef = useRef<string | null>(null);
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const first = viewableItems?.find((v) => v?.item && v.isViewable)?.item as ReplyItem | undefined;
+      if (first?.id) firstVisibleReplyIdRef.current = first.id;
+    }
+  ).current;
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 10 }).current;
+
+  const createReply = useCreateReply(postId);
   const togglePostLike = useToggleLike({ postId, invalidateKey: ["post", postId] });
 
   const patchFeedEverywhere = useCallback(
     (nextLiked: boolean) => {
-      // Patch post cache (detail)
       qc.setQueryData(["post", postId], (old: any) => {
         if (!old?.post) return old;
         const cur = !!old.post.likedByMe;
@@ -208,11 +356,9 @@ export default function PostDetail() {
         };
       });
 
-      // Patch ALL feed caches (["feed", <filter>]) because your feed is infinite + filter-based.
       const feedQueries = qc.getQueryCache().findAll({ queryKey: ["feed"] });
       for (const q of feedQueries) {
         const key = q.queryKey as unknown[];
-        // only touch keys like ["feed", "ALL" | "PERSONAL" | ...]
         if (!Array.isArray(key) || key.length < 2) continue;
 
         qc.setQueryData(key, (old: unknown) => {
@@ -250,17 +396,15 @@ export default function PostDetail() {
     const nextLiked = !currentLiked;
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    // optimistic
     patchFeedEverywhere(nextLiked);
 
     try {
-      // IMPORTANT: hook expects CURRENT state
       await togglePostLike.mutateAsync(currentLiked);
-
       await qc.invalidateQueries({ queryKey: ["post", postId] });
       await qc.invalidateQueries({ queryKey: ["feed"] });
-    } catch {
+    } catch (e: any) {
+      const msg = e?.message ?? "";
+      if (msg.toLowerCase().includes("banned")) setToast("Account is restricted.");
       await qc.invalidateQueries({ queryKey: ["post", postId] });
       await qc.invalidateQueries({ queryKey: ["feed"] });
     }
@@ -268,9 +412,7 @@ export default function PostDetail() {
 
   const toggleReplyLike = useMutation({
     mutationFn: async (vars: { replyId: string; liked: boolean }) => {
-      if (vars.liked) {
-        return apiFetch(`/api/likes`, { method: "DELETE", json: { replyId: vars.replyId } });
-      }
+      if (vars.liked) return apiFetch(`/api/likes`, { method: "DELETE", json: { replyId: vars.replyId } });
       return apiFetch(`/api/likes`, { method: "POST", json: { replyId: vars.replyId } });
     },
     onMutate: async (vars) => {
@@ -295,8 +437,10 @@ export default function PostDetail() {
 
       return { prev: qc.getQueryData(["post", postId]) };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err: any, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(["post", postId], ctx.prev);
+      const msg = err?.message ?? "";
+      if (msg.toLowerCase().includes("banned")) setToast("Account is restricted.");
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["post", postId] });
@@ -316,11 +460,188 @@ export default function PostDetail() {
     [validPostId, postId, toggleReplyLike]
   );
 
+  const pinMutation = useMutation({
+    mutationFn: async (vars: { replyId: string | null }) => pinReply(postId, vars.replyId),
+    onMutate: async (vars) => {
+      // anchor the first visible reply BEFORE reorder
+      const anchorId = firstVisibleReplyIdRef.current;
+
+      await qc.cancelQueries({ queryKey: ["post", postId] });
+      const prev = qc.getQueryData(["post", postId]);
+
+      qc.setQueryData(["post", postId], (old: any) => {
+        if (!old?.post) return old;
+        const nextPinned = vars.replyId;
+
+        const nextReplies = (old.replies ?? []).map((r: any) => ({
+          ...r,
+          isPinned: nextPinned ? r.id === nextPinned : false,
+        }));
+
+        return {
+          ...old,
+          post: { ...old.post, pinnedReplyId: nextPinned },
+          replies: nextReplies,
+        };
+      });
+
+      // after optimistic reorder, scroll back to the anchored item (no visual jump)
+      requestAnimationFrame(() => {
+        if (!anchorId) return;
+        const next = qc.getQueryData(["post", postId]) as any;
+        const nextReplies = sortRepliesPinnedFirst((next?.replies ?? []) as ReplyItem[]);
+        const idx = nextReplies.findIndex((r) => r.id === anchorId);
+        if (idx >= 0) {
+          try {
+            listRef.current?.scrollToIndex({ index: idx, animated: false, viewPosition: 0 });
+          } catch {
+            // ignore (rare: list not ready)
+          }
+        }
+      });
+
+      return { prev };
+    },
+    onError: (_e, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["post", postId], ctx.prev);
+      setToast("Couldn’t update pin. Try again.");
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["post", postId] });
+      await qc.invalidateQueries({ queryKey: ["feed"] });
+    },
+  });
+
+  const blockMutation = useMutation({
+    mutationFn: async (vars: { userId: string }) => blockUser(vars.userId),
+    onSuccess: async (_data, vars) => {
+      await qc.invalidateQueries({ queryKey: ["feed"] });
+
+      if (post?.author?.id === vars.userId) {
+        setToast("User blocked.");
+        router.back();
+        return;
+      }
+
+      qc.setQueryData(["post", postId], (old: any) => {
+        if (!old?.replies || !old?.post) return old;
+        const before = old.replies.length;
+        const nextReplies = old.replies.filter((r: any) => r?.author?.id !== vars.userId);
+        const removed = before - nextReplies.length;
+
+        return {
+          ...old,
+          post: {
+            ...old.post,
+            counts: { ...old.post.counts, replies: Math.max(0, (old.post.counts?.replies ?? 0) - removed) },
+          },
+          replies: nextReplies,
+        };
+      });
+
+      setToast("User blocked.");
+    },
+    onError: () => {
+      setToast("Couldn’t block. Please try again.");
+    },
+  });
+
+  const [reportBusy, setReportBusy] = useState(false);
+
+  const openReport = useCallback(
+    async (kind: "post" | "reply", id: string, handle: string) => {
+      const ok = await requireAuth(`/post/${postId}`);
+      if (!ok) return;
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setReportTarget({ kind, id, handle });
+      setReportOpen(true);
+    },
+    [postId]
+  );
+
+  const submitReport = useCallback(
+    async (reason: string) => {
+      if (!reportTarget) return;
+      if (reportBusy) return;
+
+      setReportBusy(true);
+      try {
+        if (reportTarget.kind === "post") await reportPost(reportTarget.id, reason);
+        else await reportReply(reportTarget.id, reason);
+
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setToast("Report submitted.");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) {
+          setToast("You already reported this.");
+          return;
+        }
+        setToast(e instanceof Error ? e.message : "Couldn’t submit report.");
+      } finally {
+        setReportBusy(false);
+      }
+    },
+    [reportTarget, reportBusy]
+  );
+
+  const openPostMenu = useCallback(() => {
+    if (!post) return;
+    if (post.isMine) return;
+
+    const actions: MenuAction[] = [
+      { label: "Report post", onPress: () => openReport("post", post.id, `@${post.author.username}`) },
+      {
+        label: `Block @${post.author.username}`,
+        destructive: true,
+        onPress: async () => {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          blockMutation.mutate({ userId: post.author.id });
+        },
+      },
+    ];
+
+    showMenu("Post options", actions);
+  }, [post, openReport, blockMutation]);
+
+  const openReplyMenu = useCallback(
+    (item: ReplyItem) => {
+      if (!post) return;
+
+      const replyIsMine = isMyReply(item);
+      const actions: MenuAction[] = [];
+
+      if (post.isMine) {
+        actions.push({
+          label: item.isPinned ? "Unpin most helpful" : "Pin as most helpful",
+          onPress: async () => {
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            pinMutation.mutate({ replyId: item.isPinned ? null : item.id });
+          },
+        });
+      }
+
+      if (!replyIsMine) {
+        actions.push({ label: "Report reply", onPress: () => openReport("reply", item.id, `@${item.author.username}`) });
+        actions.push({
+          label: `Block @${item.author.username}`,
+          destructive: true,
+          onPress: async () => {
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            blockMutation.mutate({ userId: item.author.id });
+          },
+        });
+      }
+
+      if (actions.length === 0) return;
+      showMenu("Reply options", actions);
+    },
+    [post, isMyReply, openReport, pinMutation, blockMutation]
+  );
+
   const canSend = reply.trim().length >= 2 && !createReply.isPending;
 
   const onSend = useCallback(async () => {
     if (!validPostId) return;
-
     const ok = await requireAuth(`/post/${postId}`);
     if (!ok) return;
 
@@ -328,10 +649,17 @@ export default function PostDetail() {
     if (!text) return;
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await createReply.mutateAsync(text);
-    setReply("");
-    await qc.invalidateQueries({ queryKey: ["post", postId] });
-    await qc.invalidateQueries({ queryKey: ["feed"] });
+
+    try {
+      await createReply.mutateAsync(text);
+      setReply("");
+      await qc.invalidateQueries({ queryKey: ["post", postId] });
+      await qc.invalidateQueries({ queryKey: ["feed"] });
+    } catch (e: any) {
+      const msg = e?.message ?? "";
+      if (msg.toLowerCase().includes("banned")) setToast("Account is restricted.");
+      else setToast("Couldn’t send reply.");
+    }
   }, [validPostId, postId, reply, createReply, qc]);
 
   const showInvalid = !validPostId;
@@ -366,7 +694,17 @@ export default function PostDetail() {
             Post
           </AppText>
 
-          <View style={{ width: 44 }} />
+          {post.isMine ? (
+            <View style={{ width: 44 }} />
+          ) : (
+            <Pressable
+              onPress={openPostMenu}
+              hitSlop={10}
+              style={({ pressed }) => ({ width: 44, alignItems: "flex-end", opacity: pressed ? 0.85 : 1 })}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color={t.color.textMuted} />
+            </Pressable>
+          )}
         </View>
 
         <View
@@ -423,6 +761,26 @@ export default function PostDetail() {
           </View>
         </View>
 
+        {toast ? (
+          <View style={{ marginTop: 10 }}>
+            <View
+              style={{
+                borderRadius: 999,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                alignSelf: "flex-start",
+                backgroundColor: withAlpha(t.color.surfaceAlt, 0.75),
+                borderWidth: 1,
+                borderColor: withAlpha(t.color.border, 0.9),
+              }}
+            >
+              <AppText variant="label" weight="medium" style={{ color: t.color.text }}>
+                {toast}
+              </AppText>
+            </View>
+          </View>
+        ) : null}
+
         <View style={{ marginTop: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
           <AppText variant="title" weight="semibold" style={{ letterSpacing: -0.2 }}>
             Replies
@@ -433,7 +791,7 @@ export default function PostDetail() {
         </View>
       </View>
     );
-  }, [post, t, insets.top, router, tint, onLikePost]);
+  }, [post, insets.top, openPostMenu, onLikePost, router, t, tint, toast]);
 
   return (
     <KeyboardAvoidingView
@@ -441,6 +799,14 @@ export default function PostDetail() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 8 : 0}
     >
+      <ReportModal
+        open={reportOpen}
+        title={reportTarget?.kind === "post" ? "Report post" : "Report reply"}
+        subtitle={reportTarget ? `Reporting ${reportTarget.handle}` : undefined}
+        onClose={() => setReportOpen(false)}
+        onSubmit={submitReport}
+      />
+
       {showInvalid ? (
         <View style={{ flex: 1, justifyContent: "center", padding: t.space[16] }}>
           <AppText variant="title" weight="semibold" style={{ color: t.color.text }}>
@@ -504,56 +870,79 @@ export default function PostDetail() {
       ) : (
         <View style={{ flex: 1 }}>
           <FlashList
-            data={replies}
+            ref={listRef}
+            data={orderedReplies}
             keyExtractor={(item) => item.id}
             ListHeaderComponent={Header}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 12 }}
-            renderItem={({ item }) => (
-              <View style={{ paddingHorizontal: t.space[16], paddingTop: 10 }}>
-                <View
-                  style={{
-                    borderRadius: t.radius.xl,
-                    borderWidth: 1,
-                    borderColor: withAlpha(t.color.border, 0.9),
-                    backgroundColor: withAlpha(t.color.surface, 0.96),
-                    padding: 14,
-                  }}
-                >
-                  <AppText
-                    variant="body"
-                    weight="regular"
-                    style={{
-                      color: t.color.text,
-                      letterSpacing: -0.15,
-                      lineHeight: 22,
-                    }}
-                  >
-                    {item.body}
-                  </AppText>
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
+            renderItem={({ item }) => {
+              const replyIsMine = isMyReply(item);
+              const showEllipsis = (post?.isMine ?? false) || !replyIsMine;
 
+              return (
+                <View style={{ paddingHorizontal: t.space[16], paddingTop: 10 }}>
                   <View
                     style={{
-                      marginTop: 10,
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "center",
+                      borderRadius: t.radius.xl,
+                      borderWidth: 1,
+                      borderColor: withAlpha(t.color.border, 0.9),
+                      backgroundColor: withAlpha(t.color.surface, 0.96),
+                      padding: 14,
                     }}
                   >
-                    <AppText variant="muted" weight="medium" style={{ color: t.color.textMuted }}>
-                      @{item.author.username}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                        <AppText variant="muted" weight="medium" style={{ color: t.color.textMuted }}>
+                          @{item.author.username}
+                        </AppText>
+                        {item.isPinned ? <MostHelpfulBadge /> : null}
+                      </View>
+
+                      {showEllipsis ? (
+                        <Pressable
+                          onPress={() => openReplyMenu(item)}
+                          hitSlop={10}
+                          style={({ pressed }) => ({
+                            opacity: pressed ? 0.85 : 1,
+                            paddingHorizontal: 6,
+                            paddingVertical: 4,
+                          })}
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={18} color={t.color.textMuted} />
+                        </Pressable>
+                      ) : (
+                        <View style={{ width: 24 }} />
+                      )}
+                    </View>
+
+                    <AppText
+                      variant="body"
+                      weight="regular"
+                      style={{
+                        marginTop: 10,
+                        color: t.color.text,
+                        letterSpacing: -0.15,
+                        lineHeight: 22,
+                      }}
+                    >
+                      {item.body}
                     </AppText>
 
-                    <IconChip
-                      icon={item.likedByMe ? "heart" : "heart-outline"}
-                      label={`${item.counts.likes}`}
-                      active={item.likedByMe}
-                      onPress={() => onLikeReply(item.id, item.likedByMe)}
-                    />
+                    <View style={{ marginTop: 12, flexDirection: "row", justifyContent: "flex-end", alignItems: "center" }}>
+                      <IconChip
+                        icon={item.likedByMe ? "heart" : "heart-outline"}
+                        label={`${item.counts.likes}`}
+                        active={item.likedByMe}
+                        onPress={() => onLikeReply(item.id, item.likedByMe)}
+                      />
+                    </View>
                   </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
           />
 
           {authed === true ? (
@@ -573,7 +962,7 @@ export default function PostDetail() {
                   value={reply}
                   onChangeText={setReply}
                   placeholder="Write a reply…"
-                  placeholderTextColor={t.color.textMuted}
+                  placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
                   returnKeyType="send"
                   onSubmitEditing={() => {
                     if (canSend) onSend();

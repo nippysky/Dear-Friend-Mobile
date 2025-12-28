@@ -11,6 +11,7 @@ export type FeedItem = {
   counts: { replies: number; likes: number };
   pinnedReplyId: string | null;
   likedByMe?: boolean;
+  isMine?: boolean; // ✅ added
 };
 
 export type FeedFilter = "ALL" | FeedItem["category"];

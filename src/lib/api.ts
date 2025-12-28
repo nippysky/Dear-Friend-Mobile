@@ -4,6 +4,18 @@ import { clearTokens, getTokens, setTokens } from "./session";
 
 type Json = Record<string, any>;
 
+export class ApiError extends Error {
+  status: number;
+  data: any;
+
+  constructor(message: string, status: number, data?: any) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 async function refreshAccessToken(refresh_token: string) {
   const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
     method: "POST",
@@ -12,15 +24,19 @@ async function refreshAccessToken(refresh_token: string) {
   });
 
   if (!res.ok) return null;
-  const data = (await res.json()) as { access_token: string; refresh_token: string };
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    return null;
+  }
+
   if (!data?.access_token || !data?.refresh_token) return null;
-  return data;
+  return data as { access_token: string; refresh_token: string };
 }
 
-export async function apiFetch<T>(
-  path: string,
-  options: RequestInit & { json?: Json } = {}
-): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit & { json?: Json } = {}): Promise<T> {
   const tokens = await getTokens();
 
   const headers: Record<string, string> = {
@@ -29,11 +45,11 @@ export async function apiFetch<T>(
   };
 
   if (options.json) headers["Content-Type"] = "application/json";
- // If caller explicitly provided Authorization, don't override it.
-if (!headers.Authorization && tokens?.access_token) {
-  headers.Authorization = `Bearer ${tokens.access_token}`;
-}
 
+  // If caller explicitly provided Authorization, don't override it.
+  if (!headers.Authorization && tokens?.access_token) {
+    headers.Authorization = `Bearer ${tokens.access_token}`;
+  }
 
   const doRequest = async () =>
     fetch(`${API_BASE_URL}${path}`, {
@@ -49,7 +65,7 @@ if (!headers.Authorization && tokens?.access_token) {
     const refreshed = await refreshAccessToken(tokens.refresh_token);
     if (!refreshed) {
       await clearTokens();
-      throw new Error("Session expired");
+      throw new ApiError("Session expired", 401);
     }
 
     await setTokens(refreshed);
@@ -58,11 +74,19 @@ if (!headers.Authorization && tokens?.access_token) {
   }
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: text };
+    }
+  }
 
   if (!res.ok) {
     const message = data?.error ?? `Request failed (${res.status})`;
-    throw new Error(message);
+    throw new ApiError(message, res.status, data);
   }
 
   return data as T;

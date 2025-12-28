@@ -761,6 +761,21 @@ export default function ProfileScreen() {
 
         <View style={{ height: 1, backgroundColor: withAlpha(t.color.border, 0.8) }} />
 
+<SettingRow
+  icon="ban-outline"
+  title="Blocked users"
+  subtitle="Manage people you’ve blocked."
+  onPress={async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push("/profile/blocked" as any);
+  }}
+/>
+
+
+
+
+        <View style={{ height: 1, backgroundColor: withAlpha(t.color.border, 0.8) }} />
+
         <SettingRow
           icon="log-out-outline"
           title="Sign out"

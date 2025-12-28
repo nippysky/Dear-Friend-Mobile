@@ -7,14 +7,22 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
-import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
+import {
+  ActionSheetIOS,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "../src/components/ui/AppText";
 import { useFeed, type FeedFilter, type FeedItem, type FeedPage } from "../src/hooks/useFeed";
-import { apiFetch } from "../src/lib/api";
+import { ApiError, apiFetch } from "../src/lib/api";
 import { requireAuth } from "../src/lib/requireAuth";
-import { clearTokens } from "../src/lib/session";
+import { clearTokens, getTokens } from "../src/lib/session";
 import { useTheme } from "../src/theme/ThemeProvider";
 
 const PREVIEW_CHARS = 140;
@@ -57,6 +65,25 @@ function withAlpha(color: string, alpha: number) {
   }
 
   return color;
+}
+
+function decodeJwtSub(accessToken: string): string | null {
+  try {
+    const parts = accessToken.split(".");
+    if (parts.length < 2) return null;
+    const payload = parts[1];
+
+    // base64url -> base64
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+
+    // atob exists in RN JS runtime
+    const json = globalThis.atob(padded);
+    const obj = JSON.parse(json);
+    return typeof obj?.sub === "string" ? obj.sub : null;
+  } catch {
+    return null;
+  }
 }
 
 function FilterPill({
@@ -403,19 +430,23 @@ function ReelItem({
   height,
   onLike,
   onOpenPost,
+  onMore,
   liked,
   headerOffset,
   showCategoryChip,
   onSelectCategory,
+  showMore,
 }: {
   item: FeedItem;
   height: number;
   onLike: () => void;
   onOpenPost: () => void;
+  onMore: () => void;
   liked: boolean;
   headerOffset: number;
   showCategoryChip: boolean;
   onSelectCategory: (c: FeedItem["category"]) => void;
+  showMore: boolean;
 }) {
   const { t } = useTheme();
   const insets = useSafeAreaInsets();
@@ -482,8 +513,14 @@ function ReelItem({
           alignItems: "center",
         }}
       >
-        <IconAction icon={liked ? "heart" : "heart-outline"} label={`${item.counts.likes}`} onPress={onLike} accent={liked} />
+        <IconAction
+          icon={liked ? "heart" : "heart-outline"}
+          label={`${item.counts.likes}`}
+          onPress={onLike}
+          accent={liked}
+        />
         <IconAction icon="chatbubble-ellipses-outline" label={`${item.counts.replies}`} onPress={onOpenPost} />
+        {showMore ? <IconAction icon="ellipsis-horizontal" label="More" onPress={onMore} /> : null}
       </View>
     </View>
   );
@@ -501,6 +538,20 @@ export default function FeedScreen() {
 
   const listRef = useRef<FlashListRef<FeedItem> | null>(null);
 
+  const [viewerId, setViewerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const tokens = await getTokens();
+      const sub = tokens?.access_token ? decodeJwtSub(tokens.access_token) : null;
+      if (alive) setViewerId(sub);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const [filter, setFilter] = useState<FeedFilter>("ALL");
   const [activeIndex, setActiveIndex] = useState(0);
   const [headerTint, setHeaderTint] = useState<string>(t.color.bg);
@@ -512,6 +563,16 @@ export default function FeedScreen() {
     const flat = pages.flatMap((p) => (Array.isArray(p.items) ? p.items : []));
     return flat.filter((x) => x && typeof x.id === "string" && x.id.length > 0 && x.id !== "undefined");
   }, [data]);
+
+  // ✅ "Best of both worlds": trust backend if it provides isMine, else fallback to local JWT check
+  const isMineItem = useCallback(
+    (item: FeedItem) => {
+      if ((item as any)?.isMine === true) return true;
+      if (!viewerId) return false;
+      return item?.author?.id === viewerId;
+    },
+    [viewerId]
+  );
 
   const computeHeaderTint = useCallback(
     (idx: number) => {
@@ -596,6 +657,30 @@ export default function FeedScreen() {
     [filter, qc]
   );
 
+  const patchRemoveUserEverywhere = useCallback(
+    (userId: string) => {
+      const feedQueries = qc.getQueryCache().findAll({ queryKey: ["feed"] });
+
+      for (const q of feedQueries) {
+        const key = q.queryKey as unknown[];
+        if (!Array.isArray(key) || key.length < 2) continue;
+
+        qc.setQueryData(key, (old: unknown) => {
+          const o = old as InfiniteData<FeedPage> | undefined;
+          if (!o?.pages) return old;
+
+          const nextPages = o.pages.map((pg) => {
+            const nextItems = (pg.items ?? []).filter((it) => it?.author?.id !== userId);
+            return { ...pg, items: nextItems };
+          });
+
+          return { ...o, pages: nextPages };
+        });
+      }
+    },
+    [qc]
+  );
+
   const likePost = useCallback(
     async (postId: string, currentLiked: boolean) => {
       if (!postId || postId === "undefined") return;
@@ -626,6 +711,171 @@ export default function FeedScreen() {
       }
     },
     [ensureAuthed, patchFeedLike, redirectToSignIn]
+  );
+
+  const reportPost = useCallback(async (postId: string, reason: string) => {
+    await apiFetch("/api/reports", {
+      method: "POST",
+      json: { postId, reason },
+    });
+  }, []);
+
+  const blockUser = useCallback(async (userId: string) => {
+    await apiFetch("/api/blocks", {
+      method: "POST",
+      json: { userId },
+    });
+  }, []);
+
+  const showReasonPicker = useCallback(
+    (item: FeedItem) => {
+      // Hard stop: never allow reporting your own post
+      if (isMineItem(item)) {
+        Alert.alert("Not available", "You can’t report your own post.", [{ text: "OK" }]);
+        return;
+      }
+
+      const reasons = ["Spam", "Harassment", "Hate", "Scam", "Other"];
+      const cancelIdx = reasons.length;
+
+      const submit = async (reason: string) => {
+        const ok = await ensureAuthed(`/post/${item.id}`);
+        if (!ok) return;
+
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        try {
+          await reportPost(item.id, reason);
+          Alert.alert("Reported", "Thanks — we’ll review this.", [{ text: "OK" }]);
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 409) {
+            Alert.alert("Already reported", "Thanks — we already have your report for this post.", [{ text: "OK" }]);
+            return;
+          }
+          if (e instanceof ApiError && e.status === 404) {
+            Alert.alert("Couldn’t report", "That post is no longer available.", [{ text: "OK" }]);
+            return;
+          }
+          Alert.alert("Couldn’t report", e instanceof Error ? e.message : "Please try again.", [{ text: "OK" }]);
+        }
+      };
+
+      if (Platform.OS === "ios") {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            title: "Report",
+            message: "Why are you reporting this post?",
+            options: [...reasons, "Cancel"],
+            cancelButtonIndex: cancelIdx,
+          },
+          (idx) => {
+            if (idx === cancelIdx) return;
+            const picked = reasons[idx] ?? "Other";
+
+            if (picked === "Other") {
+              Alert.prompt(
+                "Other",
+                "Add a short reason (optional).",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Submit",
+                    onPress: (text?: string) => {
+                      void submit((text?.trim() || "Other").slice(0, 500));
+                    },
+                  },
+                ],
+                "plain-text"
+              );
+              return;
+            }
+
+            void submit(picked);
+          }
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Report",
+        "Why are you reporting this post?",
+        [
+          ...reasons.map((r) => ({
+            text: r,
+            onPress: () => void submit(r),
+          })),
+          { text: "Cancel", style: "cancel" },
+        ],
+        { cancelable: true }
+      );
+    },
+    [ensureAuthed, isMineItem, reportPost]
+  );
+
+  const showPostActions = useCallback(
+    (item: FeedItem) => {
+      // UX: don’t show moderation menu on your own posts
+      if (isMineItem(item)) return;
+
+      const username = item.author?.username ? `@${item.author.username}` : "this user";
+
+      const doBlock = async () => {
+        const ok = await ensureAuthed(`/post/${item.id}`);
+        if (!ok) return;
+
+        Alert.alert(
+          "Block user?",
+          `You won’t see posts from ${username}. They won’t be notified.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Block",
+              style: "destructive",
+              onPress: async () => {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                try {
+                  await blockUser(item.author.id);
+                  patchRemoveUserEverywhere(item.author.id);
+                  await qc.invalidateQueries({ queryKey: ["feed"] });
+                } catch (e) {
+                  Alert.alert("Couldn’t block", e instanceof Error ? e.message : "Please try again.", [{ text: "OK" }]);
+                }
+              },
+            },
+          ],
+          { cancelable: true }
+        );
+      };
+
+      if (Platform.OS === "ios") {
+        const options = ["Report", `Block ${username}`, "Cancel"];
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options,
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 1,
+            title: "Post options",
+          },
+          (idx) => {
+            if (idx === 0) showReasonPicker(item);
+            if (idx === 1) void doBlock();
+          }
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Post options",
+        undefined,
+        [
+          { text: "Report", onPress: () => showReasonPicker(item) },
+          { text: `Block ${username}`, style: "destructive", onPress: () => void doBlock() },
+          { text: "Cancel", style: "cancel" },
+        ],
+        { cancelable: true }
+      );
+    },
+    [isMineItem, ensureAuthed, showReasonPicker, blockUser, patchRemoveUserEverywhere, qc]
   );
 
   const openAsk = useCallback(async () => {
@@ -735,6 +985,10 @@ export default function FeedScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
             const liked = !!item.likedByMe;
+
+            // ✅ prefer backend isMine, fallback to local check
+            const mine = (item as any)?.isMine ?? isMineItem(item);
+
             return (
               <ReelItem
                 item={item}
@@ -743,8 +997,10 @@ export default function FeedScreen() {
                 liked={liked}
                 onLike={() => likePost(item.id, liked)}
                 onOpenPost={() => openPost(item.id)}
+                onMore={() => showPostActions(item)}
                 showCategoryChip={filter === "ALL"}
                 onSelectCategory={selectCategoryFromPost}
+                showMore={!mine}
               />
             );
           }}

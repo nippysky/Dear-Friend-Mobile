@@ -12,11 +12,11 @@ import {
   Easing,
   Platform,
   Pressable,
-  Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppText } from "../../src/components/ui/AppText";
 import { apiFetch } from "../../src/lib/api";
 import { requireAuth } from "../../src/lib/requireAuth";
 import { clearTokens } from "../../src/lib/session";
@@ -87,8 +87,16 @@ function formatWAT(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   try {
-    const date = new Intl.DateTimeFormat("en-NG", { month: "short", day: "2-digit" }).format(d);
-    const time = new Intl.DateTimeFormat("en-NG", { hour: "2-digit", minute: "2-digit" }).format(d);
+    const date = new Intl.DateTimeFormat("en-NG", {
+      month: "short",
+      day: "2-digit",
+      timeZone: "Africa/Lagos",
+    }).format(d);
+    const time = new Intl.DateTimeFormat("en-NG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Africa/Lagos",
+    }).format(d);
     return `${date} • ${time} WAT`;
   } catch {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -103,24 +111,25 @@ function Stat({ label, value }: { label: string; value: string }) {
   const { t } = useTheme();
   return (
     <View style={{ alignItems: "center" }}>
-      <Text style={{ fontWeight: "900", color: t.color.text, letterSpacing: -0.3 }}>{value}</Text>
-      <Text style={{ marginTop: 2, fontWeight: "800", color: t.color.textMuted, fontSize: t.text.xs }}>
+      <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.2 }}>
+        {value}
+      </AppText>
+      <AppText
+        variant="label"
+        weight="medium"
+        style={{ marginTop: 2, color: t.color.textMuted, fontSize: t.text.xs }}
+      >
         {label}
-      </Text>
+      </AppText>
     </View>
   );
 }
 
 /**
  * ✅ Cross-platform segmented control w/ sliding thumb (iOS-ish)
+ * (Weights + sizes tuned to match the web’s calmer feel.)
  */
-function SegmentedControl({
-  value,
-  onChange,
-}: {
-  value: Tab;
-  onChange: (v: Tab) => void;
-}) {
+function SegmentedControl({ value, onChange }: { value: Tab; onChange: (v: Tab) => void }) {
   const { t } = useTheme();
 
   const items: { key: Tab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -138,7 +147,7 @@ function SegmentedControl({
     if (!segW) return;
     Animated.timing(translateX, {
       toValue: index * segW,
-      duration: 180,
+      duration: 170,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -153,7 +162,7 @@ function SegmentedControl({
         borderRadius: t.radius.pill,
         borderWidth: 1,
         borderColor: withAlpha(t.color.border, 0.95),
-        backgroundColor: withAlpha(t.color.surface, 0.7),
+        backgroundColor: withAlpha(t.color.surface, 0.72),
         overflow: "hidden",
       }}
     >
@@ -176,7 +185,6 @@ function SegmentedControl({
 
       {items.map((it) => {
         const active = value === it.key;
-
         return (
           <Pressable
             key={it.key}
@@ -194,20 +202,21 @@ function SegmentedControl({
               justifyContent: "center",
               flexDirection: "row",
               gap: 8,
-              opacity: pressed ? 0.88 : 1,
+              opacity: pressed ? 0.9 : 1,
             })}
           >
             <Ionicons name={it.icon} size={16} color={active ? t.color.bg : t.color.textMuted} />
-            <Text
+            <AppText
+              variant="label"
+              weight="semibold"
               style={{
-                fontWeight: "900",
                 fontSize: t.text.xs,
                 color: active ? t.color.bg : t.color.textMuted,
-                letterSpacing: -0.2,
+                letterSpacing: -0.15,
               }}
             >
               {it.label}
-            </Text>
+            </AppText>
           </Pressable>
         );
       })}
@@ -231,7 +240,7 @@ function SettingRow({
   const { t } = useTheme();
 
   const dangerColor =
-    (t.color as unknown as { blush?: string; blushSoft?: string }).blush ??
+    (t.color as unknown as { blush?: string }).blush ??
     (t.color as unknown as { blushSoft?: string }).blushSoft ??
     t.color.text;
 
@@ -263,17 +272,17 @@ function SettingRow({
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text
-            style={{
-              fontWeight: "900",
-              color: danger ? dangerColor : t.color.text,
-              letterSpacing: -0.2,
-            }}
+          <AppText
+            variant="body"
+            weight="semibold"
+            style={{ color: danger ? dangerColor : t.color.text, letterSpacing: -0.15 }}
           >
             {title}
-          </Text>
+          </AppText>
           {subtitle ? (
-            <Text style={{ marginTop: 2, fontWeight: "700", color: t.color.textMuted }}>{subtitle}</Text>
+            <AppText variant="muted" weight="regular" style={{ marginTop: 2 }}>
+              {subtitle}
+            </AppText>
           ) : null}
         </View>
       </View>
@@ -283,15 +292,7 @@ function SettingRow({
   );
 }
 
-function PostCard({
-  item,
-  onOpen,
-  onMenu,
-}: {
-  item: MyPost;
-  onOpen: () => void;
-  onMenu: () => void;
-}) {
+function PostCard({ item, onOpen, onMenu }: { item: MyPost; onOpen: () => void; onMenu: () => void }) {
   const { t } = useTheme();
 
   const preview = useMemo(() => {
@@ -306,7 +307,7 @@ function PostCard({
         borderRadius: t.radius.xl,
         borderWidth: 1,
         borderColor: t.color.border,
-        backgroundColor: withAlpha(t.color.surface, 0.9),
+        backgroundColor: withAlpha(t.color.surface, 0.92),
         padding: t.space[16],
         opacity: pressed ? 0.92 : 1,
       })}
@@ -322,48 +323,53 @@ function PostCard({
             backgroundColor: withAlpha(t.color.surfaceAlt, 0.85),
           }}
         >
-          <Text style={{ fontSize: t.text.xs, fontWeight: "900", color: t.color.textMuted }}>
+          <AppText variant="label" weight="medium" style={{ fontSize: t.text.xs, color: t.color.textMuted }}>
             {categoryLabel(item.category)}
-          </Text>
+          </AppText>
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <Text style={{ fontSize: t.text.xs, fontWeight: "900", color: t.color.textMuted }}>
+          <AppText variant="label" weight="regular" style={{ fontSize: t.text.xs, color: t.color.textMuted }}>
             {formatWAT(item.createdAt)}
-          </Text>
+          </AppText>
 
-          <Pressable onPress={onMenu} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, padding: 4 })}>
+          <Pressable
+            onPress={onMenu}
+            hitSlop={12}
+            style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1, padding: 4 })}
+          >
             <Ionicons name="ellipsis-horizontal" size={18} color={t.color.textMuted} />
           </Pressable>
         </View>
       </View>
 
-      <Text
+      <AppText
+        variant="body"
+        weight="semibold"
         style={{
           marginTop: 12,
           color: t.color.text,
-          fontWeight: "900",
-          letterSpacing: -0.2,
-          lineHeight: 22,
+          letterSpacing: -0.15,
+          lineHeight: t.line.md,
         }}
         numberOfLines={3}
       >
         {preview}
-      </Text>
+      </AppText>
 
       <View style={{ marginTop: 12, flexDirection: "row", gap: 14 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Ionicons name="chatbubble-ellipses-outline" size={14} color={t.color.textMuted} />
-          <Text style={{ color: t.color.textMuted, fontWeight: "900", fontSize: t.text.xs }}>
+          <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.xs }}>
             {item.counts?.replies ?? 0}
-          </Text>
+          </AppText>
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Ionicons name="heart-outline" size={14} color={t.color.textMuted} />
-          <Text style={{ color: t.color.textMuted, fontWeight: "900", fontSize: t.text.xs }}>
+          <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.xs }}>
             {item.counts?.likes ?? 0}
-          </Text>
+          </AppText>
         </View>
       </View>
     </Pressable>
@@ -573,7 +579,9 @@ export default function ProfileScreen() {
       <View style={{ flex: 1, backgroundColor: t.color.bg, alignItems: "center", justifyContent: "center" }}>
         <Stack.Screen options={{ headerShown: false }} />
         <ActivityIndicator />
-        <Text style={{ marginTop: 10, color: t.color.textMuted, fontWeight: "800" }}>Loading…</Text>
+        <AppText variant="muted" weight="regular" style={{ marginTop: 10 }}>
+          Loading…
+        </AppText>
       </View>
     );
   }
@@ -608,9 +616,9 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-back" size={18} color={t.color.text} />
         </Pressable>
 
-        <Text style={{ fontWeight: "900", color: t.color.text, letterSpacing: -0.3, fontSize: t.text.md }}>
+        <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.2 }}>
           Profile
-        </Text>
+        </AppText>
 
         <Pressable
           onPress={async () => {
@@ -641,18 +649,18 @@ export default function ProfileScreen() {
             borderRadius: t.radius.xl,
             borderWidth: 1,
             borderColor: t.color.border,
-            backgroundColor: withAlpha(t.color.surface, 0.9),
+            backgroundColor: withAlpha(t.color.surface, 0.92),
             padding: t.space[16],
           }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: t.text.lg, fontWeight: "900", color: t.color.text, letterSpacing: -0.4 }}>
+              <AppText variant="title" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.35 }}>
                 @{username}
-              </Text>
-              <Text style={{ marginTop: 4, color: t.color.textMuted, fontWeight: "800" }} numberOfLines={1}>
+              </AppText>
+              <AppText variant="muted" weight="regular" style={{ marginTop: 4 }} numberOfLines={1}>
                 {email}
-              </Text>
+              </AppText>
             </View>
 
             <Pressable
@@ -670,7 +678,9 @@ export default function ProfileScreen() {
               })}
             >
               <Ionicons name="add" size={16} color={t.color.textOnAccent} />
-              <Text style={{ fontWeight: "900", color: t.color.textOnAccent }}>Ask</Text>
+              <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent }}>
+                Ask
+              </AppText>
             </Pressable>
           </View>
 
@@ -695,7 +705,9 @@ export default function ProfileScreen() {
 
         {meErr ? (
           <View style={{ marginTop: 10 }}>
-            <Text style={{ color: t.color.textMuted, fontWeight: "800" }}>{meErr}</Text>
+            <AppText variant="muted" weight="regular">
+              {meErr}
+            </AppText>
           </View>
         ) : null}
       </View>
@@ -709,20 +721,30 @@ export default function ProfileScreen() {
           borderRadius: t.radius.xl,
           borderWidth: 1,
           borderColor: t.color.border,
-          backgroundColor: withAlpha(t.color.surface, 0.9),
+          backgroundColor: withAlpha(t.color.surface, 0.92),
           padding: t.space[16],
         }}
       >
-        <Text style={{ fontWeight: "900", color: t.color.text, letterSpacing: -0.2 }}>Account</Text>
+        <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.15 }}>
+          Account
+        </AppText>
 
         <View style={{ marginTop: 10 }}>
-          <Text style={{ color: t.color.textMuted, fontWeight: "800" }}>Username</Text>
-          <Text style={{ marginTop: 3, color: t.color.text, fontWeight: "900" }}>@{username}</Text>
+          <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+            Username
+          </AppText>
+          <AppText variant="body" weight="semibold" style={{ marginTop: 3, color: t.color.text }}>
+            @{username}
+          </AppText>
         </View>
 
         <View style={{ marginTop: 10 }}>
-          <Text style={{ color: t.color.textMuted, fontWeight: "800" }}>Email</Text>
-          <Text style={{ marginTop: 3, color: t.color.text, fontWeight: "900" }}>{email}</Text>
+          <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+            Email
+          </AppText>
+          <AppText variant="body" weight="semibold" style={{ marginTop: 3, color: t.color.text }}>
+            {email}
+          </AppText>
         </View>
 
         <View style={{ marginTop: 14, height: 1, backgroundColor: withAlpha(t.color.border, 0.8) }} />
@@ -761,14 +783,16 @@ export default function ProfileScreen() {
           borderRadius: t.radius.xl,
           borderWidth: 1,
           borderColor: t.color.border,
-          backgroundColor: withAlpha(t.color.surface, 0.9),
+          backgroundColor: withAlpha(t.color.surface, 0.92),
           padding: t.space[16],
         }}
       >
-        <Text style={{ fontWeight: "900", color: t.color.text, letterSpacing: -0.2 }}>No questions yet</Text>
-        <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+        <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.15 }}>
+          No questions yet
+        </AppText>
+        <AppText variant="muted" weight="regular" style={{ marginTop: 6, lineHeight: t.line.sm }}>
           Ask one good question and let the world do its thing.
-        </Text>
+        </AppText>
 
         <Pressable
           onPress={onAsk}
@@ -786,7 +810,9 @@ export default function ProfileScreen() {
           })}
         >
           <Ionicons name="add" size={16} color={t.color.textOnAccent} />
-          <Text style={{ fontWeight: "900", color: t.color.textOnAccent }}>Ask</Text>
+          <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent }}>
+            Ask
+          </AppText>
         </Pressable>
       </View>
     </View>
@@ -824,19 +850,25 @@ export default function ProfileScreen() {
 
               <View style={{ paddingHorizontal: t.space[16], marginTop: 14, marginBottom: 8 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ fontSize: t.text.md, fontWeight: "900", color: t.color.text, letterSpacing: -0.2 }}>
+                  <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.15 }}>
                     My Questions
-                  </Text>
+                  </AppText>
 
-                  <Pressable onPress={onRefresh} hitSlop={10} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, padding: 6 })}>
-                    <Text style={{ color: t.color.textMuted, fontWeight: "900" }}>
+                  <Pressable
+                    onPress={onRefresh}
+                    hitSlop={10}
+                    style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, padding: 6 })}
+                  >
+                    <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
                       {refreshing ? "Refreshing…" : "Refresh"}
-                    </Text>
+                    </AppText>
                   </Pressable>
                 </View>
 
                 {postsErr ? (
-                  <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "800" }}>{postsErr}</Text>
+                  <AppText variant="muted" weight="regular" style={{ marginTop: 6 }}>
+                    {postsErr}
+                  </AppText>
                 ) : null}
               </View>
 
@@ -856,9 +888,9 @@ export default function ProfileScreen() {
             <View style={{ paddingVertical: 16, alignItems: "center" }}>
               {loadingMore ? <ActivityIndicator /> : null}
               {!nextCursor && posts.length > 0 ? (
-                <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "800" }}>
+                <AppText variant="muted" weight="regular" style={{ marginTop: 8 }}>
                   You’re all caught up.
-                </Text>
+                </AppText>
               ) : null}
             </View>
           }

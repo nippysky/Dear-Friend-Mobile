@@ -8,11 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { AppText } from "../src/components/ui/AppText";
 import { apiFetch } from "../src/lib/api";
 import { signIn, signUp } from "../src/lib/authApi";
 import { useTheme } from "../src/theme/ThemeProvider";
@@ -40,16 +41,17 @@ function withAlpha(color: string, alpha: number) {
 }
 
 function sanitizeUsername(raw: string) {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  return (raw ?? "").toLowerCase().replace(/[^a-z0-9_]/g, "");
 }
 
 function passwordChecks(pw: string) {
+  const s = pw ?? "";
   return {
-    min: pw.length >= 8,
-    lower: /[a-z]/.test(pw),
-    upper: /[A-Z]/.test(pw),
-    number: /[0-9]/.test(pw),
-    special: /[^A-Za-z0-9]/.test(pw),
+    min: s.length >= 8,
+    lower: /[a-z]/.test(s),
+    upper: /[A-Z]/.test(s),
+    number: /[0-9]/.test(s),
+    special: /[^A-Za-z0-9]/.test(s),
   };
 }
 
@@ -70,6 +72,8 @@ function StatusRow({
   badText: string;
 }) {
   const { t } = useTheme();
+
+  if (state === "idle") return null;
 
   const icon =
     state === "checking"
@@ -95,17 +99,22 @@ function StatusRow({
 
   const color =
     state === "available"
-      ? "#2F7D6D"
+      ? (t.color.sage ?? "#2F7D6D")
       : state === "taken" || state === "invalid" || state === "error"
       ? "#B42318"
       : t.color.textMuted;
 
-  if (state === "idle") return null;
-
   return (
     <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
-      {state === "checking" ? <ActivityIndicator /> : icon ? <Ionicons name={icon as any} size={16} color={color} /> : null}
-      <Text style={{ color, fontWeight: "800" }}>{text}</Text>
+      {state === "checking" ? (
+        <ActivityIndicator />
+      ) : icon ? (
+        <Ionicons name={icon as any} size={16} color={color} />
+      ) : null}
+
+      <AppText variant="muted" weight="regular" style={{ color, lineHeight: t.line.sm }}>
+        {text}
+      </AppText>
     </View>
   );
 }
@@ -114,8 +123,21 @@ function RuleRow({ ok, label }: { ok: boolean; label: string }) {
   const { t } = useTheme();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
-      <Ionicons name={ok ? "checkmark-circle" : "ellipse-outline"} size={16} color={ok ? "#2F7D6D" : t.color.textMuted} />
-      <Text style={{ color: ok ? t.color.text : t.color.textMuted, fontWeight: "800" }}>{label}</Text>
+      <Ionicons
+        name={ok ? "checkmark-circle" : "ellipse-outline"}
+        size={16}
+        color={ok ? (t.color.sage ?? "#2F7D6D") : withAlpha(t.color.textMuted, 0.65)}
+      />
+      <AppText
+        variant="label"
+        weight="regular"
+        style={{
+          color: ok ? t.color.text : t.color.textMuted,
+          fontSize: t.text.xs,
+        }}
+      >
+        {label}
+      </AppText>
     </View>
   );
 }
@@ -227,13 +249,6 @@ export default function SignUpScreen() {
     paddingVertical: 14,
   });
 
-  const labelStyle = {
-    color: t.color.textMuted,
-    fontSize: t.text.sm,
-    fontWeight: "800" as const,
-    letterSpacing: -0.1,
-  };
-
   const primaryButtonStyle = (pressed: boolean) => ({
     marginTop: 8,
     height: 52,
@@ -291,19 +306,28 @@ export default function SignUpScreen() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
     >
       <View style={{ flex: 1, paddingTop: insets.top + 18, paddingBottom: insets.bottom + 16 }}>
+        {/* Title */}
         <View style={{ paddingHorizontal: t.space[16], marginTop: 6 }}>
-          <Text style={{ fontSize: 36, lineHeight: 40, fontWeight: "900", color: t.color.text, letterSpacing: -1.1 }}>
+          <AppText
+            variant="title"
+            weight="semibold"
+            style={{ fontSize: 36, lineHeight: 40, letterSpacing: -1.1 }}
+          >
             Create account
-          </Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+          </AppText>
+
+          <AppText variant="muted" weight="regular" style={{ marginTop: 8, lineHeight: t.line.sm }}>
             Just email + password. No social logins.
-          </Text>
+          </AppText>
         </View>
 
+        {/* Form */}
         <View style={{ paddingHorizontal: t.space[16], marginTop: 18, gap: 12 }}>
           {/* Username */}
           <View style={inputCardStyle(userFocused)}>
-            <Text style={labelStyle}>Username</Text>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.sm }}>
+              Username
+            </AppText>
 
             <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
               <View
@@ -337,23 +361,25 @@ export default function SignUpScreen() {
                   flex: 1,
                   color: t.color.text,
                   fontSize: t.text.md,
-                  fontWeight: "900",
-                  letterSpacing: -0.2,
+                  fontWeight: "600", // ✅ keep inputs calm
+                  letterSpacing: -0.15,
                   paddingVertical: 6,
                 }}
               />
             </View>
 
-            <Text style={{ marginTop: 8, color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "700" }}>
+            <AppText variant="label" weight="regular" style={{ marginTop: 8, color: t.color.textMuted, fontSize: t.text.xs }}>
               3–20 chars. Letters, numbers, underscore.
-            </Text>
+            </AppText>
 
             <StatusRow state={userAvail} okText="Username available" badText="Username taken" />
           </View>
 
           {/* Email */}
           <View style={inputCardStyle(emailFocused)}>
-            <Text style={labelStyle}>Email</Text>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.sm }}>
+              Email
+            </AppText>
 
             <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
               <View
@@ -388,8 +414,8 @@ export default function SignUpScreen() {
                   flex: 1,
                   color: t.color.text,
                   fontSize: t.text.md,
-                  fontWeight: "800",
-                  letterSpacing: -0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.15,
                   paddingVertical: 6,
                 }}
               />
@@ -400,7 +426,35 @@ export default function SignUpScreen() {
 
           {/* Password */}
           <View style={inputCardStyle(passFocused)}>
-            <Text style={labelStyle}>Password</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.sm }}>
+                Password
+              </AppText>
+
+              <Pressable
+                onPress={async () => {
+                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowPassword((v) => !v);
+                }}
+                hitSlop={10}
+                style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+              >
+                <View
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 17,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: withAlpha(t.color.surfaceAlt, 0.92),
+                    borderWidth: 1,
+                    borderColor: withAlpha(t.color.border, 0.95),
+                  }}
+                >
+                  <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={18} color={t.color.textMuted} />
+                </View>
+              </Pressable>
+            </View>
 
             <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
               <View
@@ -433,39 +487,13 @@ export default function SignUpScreen() {
                   flex: 1,
                   color: t.color.text,
                   fontSize: t.text.md,
-                  fontWeight: "900",
-                  letterSpacing: 0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.1,
                   paddingVertical: 6,
                 }}
               />
-
-              <Pressable
-                onPress={async () => {
-                  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowPassword((v) => !v);
-                }}
-                hitSlop={12}
-                style={({ pressed }) => ({
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: withAlpha(t.color.surface, 0.9),
-                  borderWidth: 1,
-                  borderColor: withAlpha(t.color.border, 0.95),
-                  opacity: pressed ? 0.9 : 1,
-                })}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={18}
-                  color={t.color.textMuted}
-                />
-              </Pressable>
             </View>
 
-            {/* ✅ Live rules checklist */}
             <View style={{ marginTop: 10 }}>
               <RuleRow ok={pw.min} label="At least 8 characters" />
               <RuleRow ok={pw.upper} label="One uppercase letter" />
@@ -475,33 +503,38 @@ export default function SignUpScreen() {
             </View>
           </View>
 
+          {/* Error */}
           {error ? (
             <View
               style={{
-                borderRadius: 14,
+                borderRadius: t.radius.xl,
                 borderWidth: 1,
                 borderColor: "rgba(180,35,24,0.25)",
                 backgroundColor: "rgba(180,35,24,0.08)",
-                paddingHorizontal: 12,
-                paddingVertical: 10,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                flexDirection: "row",
+                gap: 10,
+                alignItems: "flex-start",
               }}
             >
-              <Text style={{ color: "#B42318", fontWeight: "900" }}>{error}</Text>
+              <Ionicons name="alert-circle" size={18} color="#B42318" style={{ marginTop: 2 }} />
+              <AppText variant="muted" weight="regular" style={{ flex: 1, color: "#B42318", lineHeight: t.line.sm }}>
+                {error}
+              </AppText>
             </View>
           ) : null}
 
           {/* Create */}
           <Pressable onPress={onSubmit} disabled={!canSubmit} style={({ pressed }) => primaryButtonStyle(pressed)}>
             {busy ? <ActivityIndicator /> : null}
-            <Text
-              style={{
-                color: canSubmit ? t.color.textOnAccent : t.color.textMuted,
-                fontWeight: "900",
-                fontSize: t.text.md,
-              }}
+            <AppText
+              variant="button"
+              weight="semibold"
+              style={{ color: canSubmit ? t.color.textOnAccent : t.color.textMuted, fontSize: t.text.md }}
             >
               {busy ? "Creating..." : "Create account"}
-            </Text>
+            </AppText>
           </Pressable>
 
           {/* Back */}
@@ -512,7 +545,9 @@ export default function SignUpScreen() {
             }}
             style={({ pressed }) => secondaryButtonStyle(pressed)}
           >
-            <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md }}>I already have an account</Text>
+            <AppText variant="button" weight="semibold" style={{ color: t.color.text, fontSize: t.text.md }}>
+              I already have an account
+            </AppText>
           </Pressable>
         </View>
       </View>

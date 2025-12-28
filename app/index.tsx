@@ -7,9 +7,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
-import { ActivityIndicator, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppText } from "../src/components/ui/AppText";
 import { useFeed, type FeedFilter, type FeedItem, type FeedPage } from "../src/hooks/useFeed";
 import { apiFetch } from "../src/lib/api";
 import { requireAuth } from "../src/lib/requireAuth";
@@ -65,12 +66,12 @@ function FilterPill({
 }: {
   label: string;
   active: boolean;
-  onPress: () => void;
+  onPress: () => void | Promise<void>;
 }) {
   const { t } = useTheme();
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onPress as any}
       hitSlop={8}
       style={({ pressed }) => ({
         paddingHorizontal: 12,
@@ -82,16 +83,17 @@ function FilterPill({
         opacity: pressed ? 0.85 : 1,
       })}
     >
-      <Text
+      <AppText
+        variant="label"
+        weight={active ? "semibold" : "medium"}
         style={{
-          fontSize: t.text.xs,
-          fontWeight: "600",
           color: active ? t.color.bg : t.color.textMuted,
           letterSpacing: -0.2,
         }}
+        numberOfLines={1}
       >
         {label}
-      </Text>
+      </AppText>
     </Pressable>
   );
 }
@@ -103,8 +105,8 @@ function StickyHeader({
   tint,
 }: {
   active: FeedFilter;
-  setActive: (v: FeedFilter) => void;
-  onProfile: () => void;
+  setActive: (v: FeedFilter) => void | Promise<void>;
+  onProfile: () => void | Promise<void>;
   tint: string;
 }) {
   const { t } = useTheme();
@@ -118,7 +120,6 @@ function StickyHeader({
         left: 0,
         right: 0,
         paddingTop: insets.top,
-        // ✅ SOLID header; never see content underneath
         backgroundColor: tint,
         borderBottomWidth: 1,
         borderBottomColor: withAlpha(t.color.border, 0.85),
@@ -152,7 +153,7 @@ function StickyHeader({
         </View>
 
         <Pressable
-          onPress={onProfile}
+          onPress={onProfile as any}
           hitSlop={10}
           style={({ pressed }) => ({
             width: 36,
@@ -186,7 +187,11 @@ function IconAction({
 }) {
   const { t } = useTheme();
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => ({ alignItems: "center", opacity: pressed ? 0.85 : 1 })} hitSlop={10}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({ alignItems: "center", opacity: pressed ? 0.85 : 1 })}
+      hitSlop={10}
+    >
       <View
         style={{
           width: 44,
@@ -206,23 +211,22 @@ function IconAction({
         <Ionicons name={icon} size={20} color={accent ? t.color.accent : t.color.text} />
       </View>
 
-      {/* ✅ fixed height prevents layout reflow */}
       <View style={{ height: 18, marginTop: 6, justifyContent: "center" }}>
-        <Text style={{ fontSize: t.text.xs, fontWeight: "600", color: t.color.textMuted }} numberOfLines={1}>
+        <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }} numberOfLines={1}>
           {label}
-        </Text>
+        </AppText>
       </View>
     </Pressable>
   );
 }
 
-function AskFab({ onPress }: { onPress: () => void }) {
+function AskFab({ onPress }: { onPress: () => void | Promise<void> }) {
   const { t } = useTheme();
   const insets = useSafeAreaInsets();
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onPress as any}
       style={({ pressed }) => ({
         position: "absolute",
         bottom: Math.max(14, insets.bottom + 10),
@@ -262,9 +266,9 @@ function AskFab({ onPress }: { onPress: () => void }) {
           <Ionicons name="add" size={16} color={t.color.textOnAccent} />
         </View>
 
-        <Text style={{ color: t.color.textOnAccent, fontSize: t.text.md, fontWeight: "700", letterSpacing: -0.2 }}>
+        <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent, letterSpacing: -0.2 }}>
           Ask
-        </Text>
+        </AppText>
       </View>
     </Pressable>
   );
@@ -287,7 +291,9 @@ function CategoryChip({ label, onPress }: { label: string; onPress: () => void }
         opacity: pressed ? 0.85 : 1,
       })}
     >
-      <Text style={{ color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "600" }}>{label}</Text>
+      <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+        {label}
+      </AppText>
     </Pressable>
   );
 }
@@ -336,12 +342,13 @@ function EmptyState({
           <Ionicons name="sparkles-outline" size={22} color={t.color.text} />
         </View>
 
-        <Text style={{ marginTop: 14, fontSize: t.text.lg, fontWeight: "900", color: t.color.text, letterSpacing: -0.4 }}>
+        <AppText variant="title" weight="semibold" style={{ marginTop: 14, letterSpacing: -0.3 }}>
           {title}
-        </Text>
-        <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+        </AppText>
+
+        <AppText variant="muted" weight="regular" style={{ marginTop: 6 }}>
           {subtitle}
-        </Text>
+        </AppText>
 
         <View style={{ marginTop: 14, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
           <Pressable
@@ -358,7 +365,9 @@ function EmptyState({
             })}
           >
             <Ionicons name="add" size={16} color={t.color.textOnAccent} />
-            <Text style={{ fontWeight: "900", color: t.color.textOnAccent }}>{primaryLabel}</Text>
+            <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent }}>
+              {primaryLabel}
+            </AppText>
           </Pressable>
 
           {secondaryLabel && onSecondary ? (
@@ -378,7 +387,9 @@ function EmptyState({
               })}
             >
               <Ionicons name="grid-outline" size={16} color={t.color.text} />
-              <Text style={{ fontWeight: "900", color: t.color.text }}>{secondaryLabel}</Text>
+              <AppText variant="body" weight="semibold" style={{ color: t.color.text }}>
+                {secondaryLabel}
+              </AppText>
             </Pressable>
           ) : null}
         </View>
@@ -435,26 +446,28 @@ function ReelItem({
       >
         {showCategoryChip ? <CategoryChip label={label} onPress={() => onSelectCategory(item.category)} /> : null}
 
-        <Text
+        <AppText
+          variant="headline"
+          weight="semibold"
+          numberOfLines={7}
           style={{
             marginTop: showCategoryChip ? 14 : 0,
-            fontSize: 28,
-            lineHeight: 34,
-            fontWeight: "700",
-            color: t.color.text,
-            letterSpacing: -0.4,
+            letterSpacing: -0.35,
           }}
-          numberOfLines={7}
         >
           {preview}
-        </Text>
+        </AppText>
 
         <View style={{ marginTop: 16 }}>
-          <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>@{item.author.username}</Text>
+          <AppText variant="muted" weight="medium" style={{ color: t.color.textMuted }}>
+            @{item.author.username}
+          </AppText>
 
           {isLong ? (
             <Pressable onPress={onOpenPost} style={({ pressed }) => ({ marginTop: 10, opacity: pressed ? 0.75 : 1 })}>
-              <Text style={{ color: t.color.accent, fontWeight: "700" }}>Read more</Text>
+              <AppText variant="body" weight="semibold" style={{ color: t.color.accent }}>
+                Read more
+              </AppText>
             </Pressable>
           ) : null}
         </View>
@@ -514,7 +527,6 @@ export default function FeedScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
-  // ✅ Pull-to-refresh spinner
   const [refreshing, setRefreshing] = useState(false);
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -536,7 +548,6 @@ export default function FeedScreen() {
     [router]
   );
 
-  // silent auth lock
   const authLockRef = useRef(false);
   const ensureAuthed = useCallback(async (nextPath: string) => {
     if (authLockRef.current) return false;
@@ -556,7 +567,6 @@ export default function FeedScreen() {
     [router]
   );
 
-  // optimistic like patch across infinite pages
   const patchFeedLike = useCallback(
     (postId: string, nextLiked: boolean) => {
       qc.setQueryData(["feed", filter], (old: unknown) => {
@@ -605,7 +615,6 @@ export default function FeedScreen() {
         } else {
           await apiFetch(`/api/likes`, { method: "POST", json: { postId } });
         }
-        // don’t force feed refetch immediately (prevents “revert” + jitter)
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "";
         if (/session expired/i.test(msg)) {
@@ -613,7 +622,6 @@ export default function FeedScreen() {
           redirectToSignIn(nextPath);
           return;
         }
-        // rollback
         patchFeedLike(postId, currentLiked);
       }
     },
@@ -636,15 +644,12 @@ export default function FeedScreen() {
     router.push("/profile" as any);
   }, [ensureAuthed, router]);
 
-  const setFilterAndReset = useCallback(
-    async (next: FeedFilter) => {
-      setFilter(next);
-      setActiveIndex(0);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
-    },
-    []
-  );
+  const setFilterAndReset = useCallback(async (next: FeedFilter) => {
+    setFilter(next);
+    setActiveIndex(0);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+  }, []);
 
   const onMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -683,14 +688,17 @@ export default function FeedScreen() {
         </View>
       ) : isError ? (
         <View style={{ flex: 1, padding: t.space[16], justifyContent: "center" }}>
-          <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.lg }}>Couldn’t load feed</Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "600" }}>
+          <AppText variant="title" weight="semibold" style={{ color: t.color.text }}>
+            Couldn’t load feed
+          </AppText>
+
+          <AppText variant="muted" weight="regular" style={{ marginTop: 8 }}>
             {(error as Error)?.message ?? "Unknown error"}
-          </Text>
+          </AppText>
 
           <Pressable
             onPress={() => refetch()}
-            style={{
+            style={({ pressed }) => ({
               marginTop: 14,
               alignSelf: "flex-start",
               paddingHorizontal: 14,
@@ -699,9 +707,12 @@ export default function FeedScreen() {
               backgroundColor: t.color.surface,
               borderWidth: 1,
               borderColor: t.color.border,
-            }}
+              opacity: pressed ? 0.9 : 1,
+            })}
           >
-            <Text style={{ fontWeight: "700", color: t.color.text }}>Retry</Text>
+            <AppText variant="body" weight="semibold" style={{ color: t.color.text }}>
+              Retry
+            </AppText>
           </Pressable>
         </View>
       ) : isEmpty ? (
@@ -745,7 +756,6 @@ export default function FeedScreen() {
           showsVerticalScrollIndicator={false}
           drawDistance={pageHeight * 2}
           onMomentumScrollEnd={onMomentumScrollEnd}
-          // ✅ Pull to refresh (shows indicator)
           onRefresh={onPullRefresh}
           refreshing={refreshing}
         />

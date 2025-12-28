@@ -1,7 +1,7 @@
 // app/post/[id].tsx
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -11,13 +11,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppText } from "../../src/components/ui/AppText";
 import { useCreateReply } from "../../src/hooks/useCreateReply";
+import type { FeedPage } from "../../src/hooks/useFeed";
 import { usePost } from "../../src/hooks/usePost";
 import { useToggleLike } from "../../src/hooks/useToggleLike";
 import { apiFetch } from "../../src/lib/api";
@@ -66,12 +67,13 @@ function categoryTint(t: any, c: Cat) {
 }
 
 function titleSizing(body: string) {
+  // Keep it calm (closer to web): lighter + slightly smaller than before.
   const len = body.trim().length;
-  if (len <= 70) return { fontSize: 24, lineHeight: 30, fontWeight: "800" as const };
-  if (len <= 140) return { fontSize: 21, lineHeight: 27, fontWeight: "800" as const };
-  if (len <= 280) return { fontSize: 19, lineHeight: 25, fontWeight: "800" as const };
-  if (len <= 520) return { fontSize: 17, lineHeight: 23, fontWeight: "800" as const };
-  return { fontSize: 16, lineHeight: 22, fontWeight: "800" as const };
+  if (len <= 70) return { fontSize: 22, lineHeight: 28 };
+  if (len <= 140) return { fontSize: 20, lineHeight: 26 };
+  if (len <= 280) return { fontSize: 18, lineHeight: 24 };
+  if (len <= 520) return { fontSize: 17, lineHeight: 23 };
+  return { fontSize: 16, lineHeight: 22 };
 }
 
 function TinyPill({ text }: { text: string }) {
@@ -87,7 +89,9 @@ function TinyPill({ text }: { text: string }) {
         borderColor: withAlpha(t.color.border, 0.9),
       }}
     >
-      <Text style={{ color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "600" }}>{text}</Text>
+      <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+        {text}
+      </AppText>
     </View>
   );
 }
@@ -122,7 +126,9 @@ function IconChip({
       })}
     >
       <Ionicons name={icon} size={16} color={active ? t.color.accent : t.color.textMuted} />
-      <Text style={{ color: t.color.text, fontWeight: "700" }}>{label}</Text>
+      <AppText variant="label" weight="semibold" style={{ color: t.color.text }}>
+        {label}
+      </AppText>
     </Pressable>
   );
 }
@@ -181,12 +187,12 @@ export default function PostDetail() {
 
   const createReply = useCreateReply(postId);
 
-  // ✅ Use hook for POST likes (and make sure we invalidate both feed + post)
+  // hook for post likes
   const togglePostLike = useToggleLike({ postId, invalidateKey: ["post", postId] });
 
-  const patchPostLikeEverywhere = useCallback(
+  const patchFeedEverywhere = useCallback(
     (nextLiked: boolean) => {
-      // Patch post cache
+      // Patch post cache (detail)
       qc.setQueryData(["post", postId], (old: any) => {
         if (!old?.post) return old;
         const cur = !!old.post.likedByMe;
@@ -202,21 +208,34 @@ export default function PostDetail() {
         };
       });
 
-      // Patch feed cache too
-      qc.setQueryData(["feed"], (old: any) => {
-        if (!old?.items || !Array.isArray(old.items)) return old;
-        const nextItems = old.items.map((it: any) => {
-          if (!it || it.id !== postId) return it;
-          const cur = !!it.likedByMe;
-          const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
-          return {
-            ...it,
-            likedByMe: nextLiked,
-            counts: { ...it.counts, likes: Math.max(0, (it.counts?.likes ?? 0) + delta) },
-          };
+      // Patch ALL feed caches (["feed", <filter>]) because your feed is infinite + filter-based.
+      const feedQueries = qc.getQueryCache().findAll({ queryKey: ["feed"] });
+      for (const q of feedQueries) {
+        const key = q.queryKey as unknown[];
+        // only touch keys like ["feed", "ALL" | "PERSONAL" | ...]
+        if (!Array.isArray(key) || key.length < 2) continue;
+
+        qc.setQueryData(key, (old: unknown) => {
+          const o = old as InfiniteData<FeedPage> | undefined;
+          if (!o?.pages) return old;
+
+          const nextPages = o.pages.map((pg) => {
+            const nextItems = (pg.items ?? []).map((it: any) => {
+              if (!it || it.id !== postId) return it;
+              const cur = !!it.likedByMe;
+              const delta = nextLiked === cur ? 0 : nextLiked ? 1 : -1;
+              return {
+                ...it,
+                likedByMe: nextLiked,
+                counts: { ...it.counts, likes: Math.max(0, (it.counts?.likes ?? 0) + delta) },
+              };
+            });
+            return { ...pg, items: nextItems };
+          });
+
+          return { ...o, pages: nextPages };
         });
-        return { ...old, items: nextItems };
-      });
+      }
     },
     [qc, postId]
   );
@@ -232,23 +251,21 @@ export default function PostDetail() {
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // ✅ optimistic
-    patchPostLikeEverywhere(nextLiked);
+    // optimistic
+    patchFeedEverywhere(nextLiked);
 
     try {
       // IMPORTANT: hook expects CURRENT state
       await togglePostLike.mutateAsync(currentLiked);
 
-      // ✅ confirm
       await qc.invalidateQueries({ queryKey: ["post", postId] });
       await qc.invalidateQueries({ queryKey: ["feed"] });
     } catch {
       await qc.invalidateQueries({ queryKey: ["post", postId] });
       await qc.invalidateQueries({ queryKey: ["feed"] });
     }
-  }, [validPostId, post, postId, togglePostLike, patchPostLikeEverywhere, qc]);
+  }, [validPostId, post, postId, togglePostLike, patchFeedEverywhere, qc]);
 
-  // ✅ Reply like mutation (dynamic replyId)
   const toggleReplyLike = useMutation({
     mutationFn: async (vars: { replyId: string; liked: boolean }) => {
       if (vars.liked) {
@@ -259,7 +276,6 @@ export default function PostDetail() {
     onMutate: async (vars) => {
       const nextLiked = !vars.liked;
 
-      // optimistic patch inside post cache
       qc.setQueryData(["post", postId], (old: any) => {
         if (!old?.replies) return old;
 
@@ -295,7 +311,6 @@ export default function PostDetail() {
       if (!ok) return;
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
       await toggleReplyLike.mutateAsync({ replyId, liked: currentLiked });
     },
     [validPostId, postId, toggleReplyLike]
@@ -341,13 +356,15 @@ export default function PostDetail() {
           >
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Ionicons name="chevron-back" size={18} color={t.color.textMuted} />
-              <Text style={{ color: t.color.textMuted, fontWeight: "700" }}>Back</Text>
+              <AppText variant="body" weight="semibold" style={{ color: t.color.textMuted }}>
+                Back
+              </AppText>
             </View>
           </Pressable>
 
-          <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.md, letterSpacing: -0.2 }}>
+          <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.2 }}>
             Post
-          </Text>
+          </AppText>
 
           <View style={{ width: 44 }} />
         </View>
@@ -373,7 +390,6 @@ export default function PostDetail() {
           <View style={{ padding: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <TinyPill text={label} />
-
               <IconChip
                 icon={post.likedByMe ? "heart" : "heart-outline"}
                 label={`${post.counts.likes}`}
@@ -382,31 +398,38 @@ export default function PostDetail() {
               />
             </View>
 
-            <Text
+            <AppText
+              variant="headline"
+              weight="semibold"
               style={{
                 marginTop: 12,
                 color: t.color.text,
                 letterSpacing: -0.3,
                 fontSize: sizing.fontSize,
                 lineHeight: sizing.lineHeight,
-                fontWeight: sizing.fontWeight,
               }}
             >
               {post.body}
-            </Text>
+            </AppText>
 
             <View style={{ marginTop: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>@{post.author.username}</Text>
-              <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>
+              <AppText variant="muted" weight="medium" style={{ color: t.color.textMuted }}>
+                @{post.author.username}
+              </AppText>
+              <AppText variant="muted" weight="regular" style={{ color: t.color.textMuted }}>
                 {post.counts.replies} {post.counts.replies === 1 ? "reply" : "replies"}
-              </Text>
+              </AppText>
             </View>
           </View>
         </View>
 
         <View style={{ marginTop: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
-          <Text style={{ color: t.color.text, fontWeight: "800", letterSpacing: -0.2 }}>Replies</Text>
-          <Text style={{ color: t.color.textMuted, fontWeight: "600" }}>Be helpful.</Text>
+          <AppText variant="title" weight="semibold" style={{ letterSpacing: -0.2 }}>
+            Replies
+          </AppText>
+          <AppText variant="muted" weight="regular">
+            Be helpful.
+          </AppText>
         </View>
       </View>
     );
@@ -420,8 +443,12 @@ export default function PostDetail() {
     >
       {showInvalid ? (
         <View style={{ flex: 1, justifyContent: "center", padding: t.space[16] }}>
-          <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.lg }}>Couldn’t open post</Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "600" }}>This link looks broken.</Text>
+          <AppText variant="title" weight="semibold" style={{ color: t.color.text }}>
+            Couldn’t open post
+          </AppText>
+          <AppText variant="muted" weight="regular" style={{ marginTop: 8 }}>
+            This link looks broken.
+          </AppText>
 
           <Pressable
             onPress={() => router.back()}
@@ -437,7 +464,9 @@ export default function PostDetail() {
               opacity: pressed ? 0.9 : 1,
             })}
           >
-            <Text style={{ color: t.color.text, fontWeight: "800" }}>Go back</Text>
+            <AppText variant="body" weight="semibold" style={{ color: t.color.text }}>
+              Go back
+            </AppText>
           </Pressable>
         </View>
       ) : isLoading ? (
@@ -446,10 +475,12 @@ export default function PostDetail() {
         </View>
       ) : isError ? (
         <View style={{ flex: 1, padding: t.space[16], justifyContent: "center" }}>
-          <Text style={{ color: t.color.text, fontWeight: "800" }}>Couldn’t load post</Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "600" }}>
+          <AppText variant="title" weight="semibold" style={{ color: t.color.text }}>
+            Couldn’t load post
+          </AppText>
+          <AppText variant="muted" weight="regular" style={{ marginTop: 8 }}>
             {(error as Error).message}
-          </Text>
+          </AppText>
 
           <Pressable
             onPress={() => refetch()}
@@ -465,7 +496,9 @@ export default function PostDetail() {
               opacity: pressed ? 0.9 : 1,
             })}
           >
-            <Text style={{ color: t.color.text, fontWeight: "800" }}>Retry</Text>
+            <AppText variant="body" weight="semibold" style={{ color: t.color.text }}>
+              Retry
+            </AppText>
           </Pressable>
         </View>
       ) : (
@@ -487,21 +520,29 @@ export default function PostDetail() {
                     padding: 14,
                   }}
                 >
-                  {/* Reply body: normal (not bold), slightly heavier than username */}
-                  <Text
+                  <AppText
+                    variant="body"
+                    weight="regular"
                     style={{
                       color: t.color.text,
-                      fontWeight: "600",
-                      fontSize: 16,
+                      letterSpacing: -0.15,
                       lineHeight: 22,
-                      letterSpacing: -0.2,
                     }}
                   >
                     {item.body}
-                  </Text>
+                  </AppText>
 
-                  <View style={{ marginTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                    <Text style={{ color: t.color.textMuted, fontWeight: "500" }}>@{item.author.username}</Text>
+                  <View
+                    style={{
+                      marginTop: 10,
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <AppText variant="muted" weight="medium" style={{ color: t.color.textMuted }}>
+                      @{item.author.username}
+                    </AppText>
 
                     <IconChip
                       icon={item.likedByMe ? "heart" : "heart-outline"}
@@ -515,7 +556,6 @@ export default function PostDetail() {
             )}
           />
 
-          {/* No reply-to-reply. Single composer replies to the post only. */}
           {authed === true ? (
             <View
               style={{
@@ -547,7 +587,9 @@ export default function PostDetail() {
                     paddingHorizontal: 14,
                     paddingVertical: 11,
                     color: t.color.text,
-                    fontWeight: "600",
+                    fontSize: t.text.md,
+                    fontWeight: "500",
+                    letterSpacing: -0.15,
                   }}
                 />
 
@@ -562,9 +604,9 @@ export default function PostDetail() {
                     opacity: pressed ? 0.9 : 1,
                   })}
                 >
-                  <Text style={{ color: t.color.textOnAccent, fontWeight: "900" }}>
+                  <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent }}>
                     {createReply.isPending ? "…" : "Send"}
-                  </Text>
+                  </AppText>
                 </Pressable>
               </View>
             </View>
@@ -579,9 +621,9 @@ export default function PostDetail() {
                 borderTopColor: withAlpha(t.color.border, 0.9),
               }}
             >
-              <Text style={{ color: t.color.textMuted, fontWeight: "600", textAlign: "center" }}>
+              <AppText variant="muted" weight="regular" style={{ textAlign: "center" }}>
                 Sign in to reply or like.
-              </Text>
+              </AppText>
 
               <Pressable
                 onPress={() => requireAuth(`/post/${postId}`)}
@@ -597,7 +639,9 @@ export default function PostDetail() {
                   opacity: pressed ? 0.9 : 1,
                 })}
               >
-                <Text style={{ color: t.color.accent, fontWeight: "800" }}>Sign in</Text>
+                <AppText variant="body" weight="semibold" style={{ color: t.color.accent }}>
+                  Sign in
+                </AppText>
               </Pressable>
             </View>
           ) : null}

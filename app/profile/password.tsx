@@ -10,11 +10,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { AppText } from "../../src/components/ui/AppText";
 import { apiFetch } from "../../src/lib/api";
 import { requireAuth } from "../../src/lib/requireAuth";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -61,16 +62,17 @@ function passwordChecks(pw: string) {
 
 function CheckRow({ ok, label }: { ok: boolean; label: string }) {
   const { t } = useTheme();
+  const okColor = t.color.sage ?? "#2F7D6D";
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <Ionicons
         name={ok ? "checkmark-circle" : "ellipse-outline"}
         size={16}
-        color={ok ? "#2F7D6D" : withAlpha(t.color.textMuted, 0.65)}
+        color={ok ? okColor : withAlpha(t.color.textMuted, 0.65)}
       />
-      <Text style={{ color: t.color.textMuted, fontWeight: "800", fontSize: t.text.xs }}>
+      <AppText variant="label" weight="regular" style={{ color: t.color.textMuted, fontSize: t.text.xs }}>
         {label}
-      </Text>
+      </AppText>
     </View>
   );
 }
@@ -206,6 +208,8 @@ export default function ChangePasswordScreen() {
     elevation: canSubmit ? 6 : 0,
   });
 
+  const errorColor = t.color.danger ?? "#B42318";
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: t.color.bg }}
@@ -234,13 +238,19 @@ export default function ChangePasswordScreen() {
           >
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Ionicons name="chevron-back" size={18} color={t.color.textMuted} />
-              <Text style={{ color: t.color.textMuted, fontWeight: "800" }}>Back</Text>
+              <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+                Back
+              </AppText>
             </View>
           </Pressable>
 
-          <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md, letterSpacing: -0.2 }}>
+          <AppText
+            variant="body"
+            weight="semibold"
+            style={{ color: t.color.text, fontSize: t.text.md, letterSpacing: -0.2 }}
+          >
             Change password
-          </Text>
+          </AppText>
 
           <View style={{ width: 44 }} />
         </View>
@@ -253,29 +263,33 @@ export default function ChangePasswordScreen() {
             </View>
           ) : (
             <>
-              <Text style={{ color: t.color.textMuted, fontWeight: "800" }}>Signed in as</Text>
-              <Text style={{ marginTop: 6, color: t.color.text, fontWeight: "900" }}>
+              <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
+                Signed in as
+              </AppText>
+              <AppText variant="body" weight="semibold" style={{ marginTop: 6, color: t.color.text }}>
                 @{username === "—" ? "—" : username}
-              </Text>
-              <Text style={{ marginTop: 2, color: t.color.textMuted, fontWeight: "800" }}>{email}</Text>
+              </AppText>
+              <AppText variant="muted" weight="regular" style={{ marginTop: 2 }}>
+                {email}
+              </AppText>
             </>
           )}
         </View>
 
         {/* Form */}
         <View style={card}>
-          <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.lg, letterSpacing: -0.2 }}>
+          <AppText variant="title" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.2 }}>
             Update your password
-          </Text>
-          <Text style={{ marginTop: 6, color: t.color.textMuted, fontWeight: "800", lineHeight: 20 }}>
+          </AppText>
+          <AppText variant="muted" weight="regular" style={{ marginTop: 6, lineHeight: t.line.sm }}>
             Strong passwords are boring. That’s how you know they work.
-          </Text>
+          </AppText>
 
           {/* Current */}
           <View style={{ marginTop: 14 }}>
-            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 8 }}>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, marginBottom: 8 }}>
               Current password
-            </Text>
+            </AppText>
 
             <View style={inputShell(curFocused)}>
               <View style={[iconPill, { marginRight: 10 }]}>
@@ -292,8 +306,8 @@ export default function ChangePasswordScreen() {
                   flex: 1,
                   paddingVertical: 12,
                   color: t.color.text,
-                  fontWeight: "800",
-                  letterSpacing: -0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.15,
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -318,9 +332,9 @@ export default function ChangePasswordScreen() {
 
           {/* New */}
           <View style={{ marginTop: 14 }}>
-            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 8 }}>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, marginBottom: 8 }}>
               New password
-            </Text>
+            </AppText>
 
             <View style={inputShell(nextFocused)}>
               <View style={[iconPill, { marginRight: 10 }]}>
@@ -338,8 +352,8 @@ export default function ChangePasswordScreen() {
                   flex: 1,
                   paddingVertical: 12,
                   color: t.color.text,
-                  fontWeight: "800",
-                  letterSpacing: -0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.15,
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -371,9 +385,9 @@ export default function ChangePasswordScreen() {
 
           {/* Confirm */}
           <View style={{ marginTop: 14 }}>
-            <Text style={{ color: t.color.textMuted, fontWeight: "800", marginBottom: 8 }}>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, marginBottom: 8 }}>
               Confirm new password
-            </Text>
+            </AppText>
 
             <View style={inputShell(confirmFocused)}>
               <View style={[iconPill, { marginRight: 10 }]}>
@@ -391,8 +405,8 @@ export default function ChangePasswordScreen() {
                   flex: 1,
                   paddingVertical: 12,
                   color: t.color.text,
-                  fontWeight: "800",
-                  letterSpacing: -0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.15,
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -423,23 +437,25 @@ export default function ChangePasswordScreen() {
                 <Ionicons
                   name={nextPw.trim() === confirmPw.trim() ? "checkmark-circle" : "close-circle"}
                   size={16}
-                  color={nextPw.trim() === confirmPw.trim() ? "#2F7D6D" : "#B42318"}
+                  color={nextPw.trim() === confirmPw.trim() ? (t.color.sage ?? "#2F7D6D") : errorColor}
                 />
-                <Text style={{ color: t.color.textMuted, fontWeight: "800", fontSize: t.text.xs }}>
+                <AppText variant="label" weight="regular" style={{ color: t.color.textMuted, fontSize: t.text.xs }}>
                   {nextPw.trim() === confirmPw.trim() ? "Passwords match" : "Passwords don’t match"}
-                </Text>
+                </AppText>
               </View>
             ) : null}
           </View>
 
           {validation ? (
-            <Text style={{ marginTop: 12, color: t.color.textMuted, fontWeight: "900" }}>{validation}</Text>
+            <AppText variant="muted" weight="regular" style={{ marginTop: 12 }}>
+              {validation}
+            </AppText>
           ) : null}
 
           {changePassword.isError ? (
-            <Text style={{ marginTop: 12, color: "#B42318", fontWeight: "900" }}>
+            <AppText variant="label" weight="medium" style={{ marginTop: 12, color: errorColor }}>
               {(changePassword.error as Error)?.message ?? "Couldn’t update password."}
-            </Text>
+            </AppText>
           ) : null}
 
           <Pressable
@@ -451,20 +467,25 @@ export default function ChangePasswordScreen() {
             style={({ pressed }) => primaryButton(pressed)}
           >
             {changePassword.isPending ? <ActivityIndicator /> : null}
-            <Text
+            <AppText
+              variant="button"
+              weight="semibold"
               style={{
-                fontWeight: "900",
                 color: canSubmit ? t.color.textOnAccent : t.color.textMuted,
                 fontSize: t.text.md,
               }}
             >
               {changePassword.isPending ? "Updating…" : "Update password"}
-            </Text>
+            </AppText>
           </Pressable>
 
-          <Text style={{ marginTop: 10, color: t.color.textMuted, fontWeight: "800", fontSize: t.text.xs, lineHeight: 18 }}>
+          <AppText
+            variant="label"
+            weight="regular"
+            style={{ marginTop: 10, color: t.color.textMuted, fontSize: t.text.xs, lineHeight: 18 }}
+          >
             Tip: a passphrase (two random words + symbols) beats “Password123!” every day of the week.
-          </Text>
+          </AppText>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

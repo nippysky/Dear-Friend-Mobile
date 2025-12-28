@@ -8,11 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { AppText } from "../src/components/ui/AppText";
 import { apiFetch } from "../src/lib/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 
@@ -51,10 +52,12 @@ export default function ForgotPassword() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const emailTrim = useMemo(() => email.trim().toLowerCase(), [email]);
-  const valid = useMemo(() => emailTrim.includes("@") && emailTrim.includes(".") && !busy, [emailTrim, busy]);
+  const valid = useMemo(
+    () => emailTrim.includes("@") && emailTrim.includes(".") && !busy,
+    [emailTrim, busy]
+  );
 
-  const successMsg =
-    "If an account exists for that email, you’ll receive a reset link shortly.";
+  const successMsg = "If an account exists for that email, you’ll receive a reset link shortly.";
 
   const onSubmit = async () => {
     if (!valid) return;
@@ -124,20 +127,25 @@ export default function ForgotPassword() {
     >
       <View style={{ flex: 1, paddingTop: insets.top + 18, paddingBottom: insets.bottom + 16 }}>
         <View style={{ paddingHorizontal: t.space[16], marginTop: 6 }}>
-          <Text style={{ fontSize: 36, lineHeight: 40, fontWeight: "900", color: t.color.text, letterSpacing: -1.1 }}>
+          <AppText
+            variant="title"
+            weight="semibold"
+            style={{ fontSize: 36, lineHeight: 40, letterSpacing: -1.1 }}
+          >
             Reset password
-          </Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+          </AppText>
+
+          <AppText variant="muted" weight="regular" style={{ marginTop: 8, lineHeight: t.line.sm }}>
             We’ll email you a link to set a new password.
-          </Text>
+          </AppText>
         </View>
 
         <View style={{ paddingHorizontal: t.space[16], marginTop: 18, gap: 12 }}>
           {/* Email */}
           <View style={inputCardStyle}>
-            <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "800", letterSpacing: -0.1 }}>
+            <AppText variant="label" weight="medium" style={{ color: t.color.textMuted, fontSize: t.text.sm }}>
               Email
-            </Text>
+            </AppText>
 
             <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
               <View
@@ -172,16 +180,20 @@ export default function ForgotPassword() {
                   flex: 1,
                   color: t.color.text,
                   fontSize: t.text.md,
-                  fontWeight: "800",
-                  letterSpacing: -0.2,
+                  fontWeight: "600",
+                  letterSpacing: -0.15,
                   paddingVertical: 6,
                 }}
               />
             </View>
 
-            <Text style={{ marginTop: 8, color: t.color.textMuted, fontSize: t.text.xs, fontWeight: "700" }}>
+            <AppText
+              variant="label"
+              weight="regular"
+              style={{ marginTop: 8, color: t.color.textMuted, fontSize: t.text.xs }}
+            >
               We won’t reveal whether an account exists.
-            </Text>
+            </AppText>
           </View>
 
           {/* Status */}
@@ -199,23 +211,26 @@ export default function ForgotPassword() {
                 alignItems: "flex-start",
               }}
             >
-              <Ionicons name="checkmark-circle" size={18} color="#2F7D6D" style={{ marginTop: 2 }} />
-              <Text style={{ flex: 1, color: t.color.textMuted, fontWeight: "800", lineHeight: 20 }}>{msg}</Text>
+              <Ionicons name="checkmark-circle" size={18} color={t.color.sage ?? "#2F7D6D"} style={{ marginTop: 2 }} />
+              <AppText variant="muted" weight="regular" style={{ flex: 1, lineHeight: t.line.sm }}>
+                {msg}
+              </AppText>
             </View>
           ) : null}
 
           {/* CTA */}
           <Pressable onPress={onSubmit} disabled={!valid} style={({ pressed }) => primaryButtonStyle(pressed)}>
             {busy ? <ActivityIndicator /> : null}
-            <Text
+            <AppText
+              variant="button"
+              weight="semibold"
               style={{
                 color: valid ? t.color.textOnAccent : t.color.textMuted,
-                fontWeight: "900",
                 fontSize: t.text.md,
               }}
             >
               {busy ? "Sending..." : "Send reset link"}
-            </Text>
+            </AppText>
           </Pressable>
 
           {/* Back */}
@@ -226,7 +241,9 @@ export default function ForgotPassword() {
             }}
             style={({ pressed }) => secondaryButtonStyle(pressed)}
           >
-            <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md }}>Back to sign in</Text>
+            <AppText variant="button" weight="semibold" style={{ color: t.color.text, fontSize: t.text.md }}>
+              Back to sign in
+            </AppText>
           </Pressable>
         </View>
       </View>

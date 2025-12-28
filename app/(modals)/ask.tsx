@@ -4,25 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  SlideInDown,
-  SlideOutDown,
-  ZoomIn,
-  ZoomOut,
-} from "react-native-reanimated";
+import { Keyboard, KeyboardAvoidingView, Platform, Pressable, TextInput, View } from "react-native";
+import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown, ZoomIn, ZoomOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppText } from "../../src/components/ui/AppText";
 import { useCreatePost } from "../../src/hooks/useCreatePost";
 import { useTheme } from "../../src/theme/ThemeProvider";
 
@@ -101,24 +87,24 @@ function CategoryBubble({
           paddingHorizontal: 18,
           paddingVertical: 14,
           borderRadius: 999,
-          backgroundColor: withAlpha(catTint(t, cat), 0.75),
+          backgroundColor: withAlpha(catTint(t, cat), 0.72),
           borderWidth: 1,
           borderColor: withAlpha(t.color.border, 0.9),
           flexDirection: "row",
           alignItems: "center",
           gap: 10,
-          shadowOpacity: 0.12,
-          shadowRadius: 18,
+          shadowOpacity: 0.10,
+          shadowRadius: 16,
           shadowOffset: { width: 0, height: 10 },
           elevation: 4,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
+          transform: [{ scale: pressed ? 0.985 : 1 }],
         })}
       >
         <View
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
+            width: 30,
+            height: 30,
+            borderRadius: 15,
             backgroundColor: withAlpha(t.color.surface, 0.85),
             borderWidth: 1,
             borderColor: withAlpha(t.color.border, 0.85),
@@ -139,16 +125,9 @@ function CategoryBubble({
           />
         </View>
 
-        <Text
-          style={{
-            color: t.color.text,
-            fontSize: t.text.md,
-            fontWeight: "800",
-            letterSpacing: -0.2,
-          }}
-        >
+        <AppText variant="button" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.15 }}>
           {label}
-        </Text>
+        </AppText>
       </Pressable>
     </Animated.View>
   );
@@ -209,13 +188,12 @@ export default function AskModal() {
 
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // ✅ create post, then go Home + refresh feed
     await createPost.mutateAsync({ category, body: trimmed });
     await qc.invalidateQueries({ queryKey: ["feed"] });
     router.replace("/" as any);
   };
 
-  const bgTint = withAlpha(catTint(t, category), 0.35);
+  const bgTint = withAlpha(catTint(t, category), 0.32);
 
   return (
     <KeyboardAvoidingView
@@ -224,22 +202,26 @@ export default function AskModal() {
     >
       <Pressable onPress={() => Keyboard.dismiss()} style={{ flex: 1 }} accessible={false}>
         <View style={{ flex: 1, paddingTop: insets.top + 10, paddingHorizontal: t.space[16] }}>
+          {/* Top bar */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Pressable
               onPress={() => router.back()}
               hitSlop={10}
               style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 6, paddingHorizontal: 4 })}
             >
-              <Text style={{ color: t.color.textMuted, fontWeight: "700" }}>Close</Text>
+              <AppText variant="body" weight="semibold" style={{ color: t.color.textMuted }}>
+                Close
+              </AppText>
             </Pressable>
 
-            <Text style={{ color: t.color.text, fontWeight: "800", fontSize: t.text.md, letterSpacing: -0.2 }}>
+            <AppText variant="body" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.2 }}>
               Ask
-            </Text>
+            </AppText>
 
             <View style={{ width: 44 }} />
           </View>
 
+          {/* Soft tinted backdrop */}
           <View
             style={{
               position: "absolute",
@@ -248,35 +230,29 @@ export default function AskModal() {
               right: 0,
               bottom: 0,
               backgroundColor: bgTint,
-              opacity: step === "COMPOSE" ? 1 : 0.25,
+              opacity: step === "COMPOSE" ? 1 : 0.22,
             }}
             pointerEvents="none"
           />
 
+          {/* STEP: PICK */}
           {step === "PICK" ? (
             <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)} style={{ flex: 1 }}>
               <View style={{ marginTop: 26 }}>
-                <Text
-                  style={{
-                    color: t.color.text,
-                    fontSize: t.text.lg,
-                    fontWeight: "900",
-                    letterSpacing: -0.4,
-                  }}
-                >
+                <AppText variant="title" weight="semibold" style={{ color: t.color.text, letterSpacing: -0.35 }}>
                   Pick a category
-                </Text>
-                <Text
+                </AppText>
+                <AppText
+                  variant="muted"
+                  weight="regular"
                   style={{
                     marginTop: 6,
-                    color: t.color.textMuted,
-                    fontWeight: "600",
-                    lineHeight: 20,
                     maxWidth: 320,
+                    lineHeight: t.line.sm,
                   }}
                 >
                   Start where it fits. You can always change it later.
-                </Text>
+                </AppText>
               </View>
 
               <View style={{ flex: 1, marginTop: 18 }}>
@@ -323,21 +299,23 @@ export default function AskModal() {
                       borderColor: withAlpha(t.color.border, 0.85),
                     }}
                   >
-                    <Text style={{ color: t.color.textMuted, fontWeight: "600", fontSize: t.text.xs }}>
+                    <AppText variant="label" weight="medium" style={{ color: t.color.textMuted }}>
                       Tap a bubble to continue
-                    </Text>
+                    </AppText>
                   </View>
                 </View>
               </View>
             </Animated.View>
           ) : null}
 
+          {/* STEP: COMPOSE */}
           {step === "COMPOSE" ? (
             <Animated.View
               entering={SlideInDown.duration(150)}
               exiting={SlideOutDown.duration(120)}
               style={{ flex: 1, paddingTop: 18 }}
             >
+              {/* Compose header row */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                 <Pressable
                   onPress={goPick}
@@ -356,7 +334,9 @@ export default function AskModal() {
                   })}
                 >
                   <Ionicons name="chevron-back" size={16} color={t.color.textMuted} />
-                  <Text style={{ color: t.color.textMuted, fontWeight: "700" }}>Change</Text>
+                  <AppText variant="body" weight="semibold" style={{ color: t.color.textMuted }}>
+                    Change
+                  </AppText>
                 </Pressable>
 
                 <View
@@ -369,10 +349,13 @@ export default function AskModal() {
                     borderColor: withAlpha(t.color.border, 0.9),
                   }}
                 >
-                  <Text style={{ color: t.color.text, fontWeight: "800" }}>{catLabel(category)}</Text>
+                  <AppText variant="label" weight="semibold" style={{ color: t.color.text }}>
+                    {catLabel(category)}
+                  </AppText>
                 </View>
               </View>
 
+              {/* Composer card */}
               <View
                 style={{
                   marginTop: 14,
@@ -399,9 +382,10 @@ export default function AskModal() {
                   showSoftInputOnFocus
                   style={{
                     color: t.color.text,
-                    fontSize: 18,
-                    lineHeight: 26,
-                    fontWeight: "650" as any,
+                    fontSize: t.text.lg, // 18
+                    lineHeight: t.line.lg, // 26
+                    fontWeight: "500",
+                    letterSpacing: -0.15,
                     textAlignVertical: "top",
                     flex: 1,
                     paddingTop: 2,
@@ -409,24 +393,25 @@ export default function AskModal() {
                 />
 
                 <View style={{ marginTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={{ color: t.color.textMuted, fontWeight: "650" as any }}>
+                  <AppText variant="muted" weight="regular">
                     {body.length}/{MAX_POST_CHARS}
-                  </Text>
-                  <Text style={{ color: t.color.textMuted, fontWeight: "650" as any }}>
+                  </AppText>
+                  <AppText variant="muted" weight="regular">
                     {remaining} left
-                  </Text>
+                  </AppText>
                 </View>
 
-                {(isEmpty || tooShort) ? (
+                {isEmpty || tooShort ? (
                   <View style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Ionicons name="alert-circle-outline" size={16} color="#B42318" />
-                    <Text style={{ color: "#B42318", fontWeight: "650" as any }}>
+                    <Ionicons name="alert-circle-outline" size={16} color={t.color.blush} />
+                    <AppText variant="label" weight="medium" style={{ color: t.color.blush }}>
                       {isEmpty ? "Write something to post." : `Keep it at least ${MIN_POST_CHARS} characters.`}
-                    </Text>
+                    </AppText>
                   </View>
                 ) : null}
               </View>
 
+              {/* Post button */}
               <Pressable
                 disabled={!canPost}
                 onPress={post}
@@ -440,9 +425,9 @@ export default function AskModal() {
                   opacity: pressed ? 0.92 : 1,
                 })}
               >
-                <Text style={{ color: t.color.textOnAccent, fontWeight: "900", fontSize: t.text.md }}>
+                <AppText variant="button" weight="semibold" style={{ color: t.color.textOnAccent }}>
                   {createPost.isPending ? "Posting..." : "Post"}
-                </Text>
+                </AppText>
               </Pressable>
             </Animated.View>
           ) : null}

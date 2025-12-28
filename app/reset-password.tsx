@@ -8,11 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  Text,
   TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { AppText } from "@/src/components/ui/AppText";
 import { apiFetch } from "../src/lib/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 
@@ -48,13 +49,7 @@ function passwordChecks(pw: string) {
   };
 }
 
-function CheckRow({
-  ok,
-  label,
-}: {
-  ok: boolean;
-  label: string;
-}) {
+function CheckRow({ ok, label }: { ok: boolean; label: string }) {
   const { t } = useTheme();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -63,9 +58,9 @@ function CheckRow({
         size={16}
         color={ok ? "#2F7D6D" : withAlpha(t.color.textMuted, 0.65)}
       />
-      <Text style={{ color: t.color.textMuted, fontWeight: "800", fontSize: t.text.xs }}>
+      <AppText variant="label" weight="medium">
         {label}
-      </Text>
+      </AppText>
     </View>
   );
 }
@@ -108,25 +103,35 @@ export default function ResetPassword() {
     return true;
   }, [accessToken, busy, checks, newPassword, confirm]);
 
+  const isSuccessMsg = useMemo(() => {
+    const s = (msg ?? "").toLowerCase();
+    return s.includes("updated") || s.includes("success") || s.includes("sign in");
+  }, [msg]);
+
   const onSubmit = async () => {
     if (!valid) return;
     setMsg(null);
     setBusy(true);
 
     try {
-      await apiFetch("/api/auth/update-password", {
-        method: "POST",
-        json: { newPassword: newPassword.trim() },
-        headers: { Authorization: `Bearer ${accessToken}` },
-      } as any);
+      await apiFetch(
+        "/api/auth/update-password",
+        {
+          method: "POST",
+          json: { newPassword: newPassword.trim() },
+          headers: { Authorization: `Bearer ${accessToken}` },
+        } as any
+      );
 
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setMsg("Password updated. Please sign in.");
+
       setNewPassword("");
       setConfirm("");
+      setMsg("Password updated. Please sign in.");
 
       router.replace("/sign-in" as any);
     } catch (e: any) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setMsg(e?.message ?? "Couldn’t update password.");
     } finally {
       setBusy(false);
@@ -181,13 +186,23 @@ export default function ResetPassword() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
     >
       <View style={{ flex: 1, paddingTop: insets.top + 18, paddingBottom: insets.bottom + 16 }}>
+        {/* Header */}
         <View style={{ paddingHorizontal: t.space[16], marginTop: 6 }}>
-          <Text style={{ fontSize: 36, lineHeight: 40, fontWeight: "900", color: t.color.text, letterSpacing: -1.1 }}>
+          <AppText
+            variant="headline"
+            weight="semibold"
+            style={{
+              fontSize: 36,
+              lineHeight: 40,
+              letterSpacing: -1.1,
+            }}
+          >
             Set new password
-          </Text>
-          <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "700", lineHeight: 20 }}>
+          </AppText>
+
+          <AppText variant="muted" style={{ marginTop: 8, fontWeight: "700", lineHeight: 20 }}>
             Use a strong password you can still remember.
-          </Text>
+          </AppText>
         </View>
 
         <View style={{ paddingHorizontal: t.space[16], marginTop: 18, gap: 12 }}>
@@ -203,13 +218,12 @@ export default function ResetPassword() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <Ionicons name="alert-circle" size={18} color="#B42318" />
-                <Text style={{ color: t.color.text, fontWeight: "900" }}>
-                  This reset link is invalid or expired.
-                </Text>
+                <AppText variant="title">This reset link is invalid or expired.</AppText>
               </View>
-              <Text style={{ marginTop: 8, color: t.color.textMuted, fontWeight: "800", lineHeight: 20 }}>
+
+              <AppText variant="muted" style={{ marginTop: 8, fontWeight: "800", lineHeight: 20 }}>
                 Go back and request a new one.
-              </Text>
+              </AppText>
 
               <Pressable
                 onPress={async () => {
@@ -219,9 +233,9 @@ export default function ResetPassword() {
                 style={({ pressed }) => secondaryButtonStyle(pressed)}
               >
                 <Ionicons name="mail-outline" size={18} color={t.color.text} />
-                <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md }}>
+                <AppText variant="body" weight="semibold" style={{ fontSize: t.text.md }}>
                   Request new link
-                </Text>
+                </AppText>
               </Pressable>
             </View>
           ) : (
@@ -229,9 +243,9 @@ export default function ResetPassword() {
               {/* New password */}
               <View style={inputCard(pwFocused)}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "800" }}>
+                  <AppText variant="muted" weight="semibold" style={{ fontSize: t.text.sm }}>
                     New password
-                  </Text>
+                  </AppText>
 
                   <Pressable
                     onPress={async () => {
@@ -284,6 +298,8 @@ export default function ResetPassword() {
                     placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
                     onFocus={() => setPwFocused(true)}
                     onBlur={() => setPwFocused(false)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     style={{
                       flex: 1,
                       color: t.color.text,
@@ -306,9 +322,9 @@ export default function ResetPassword() {
               {/* Confirm */}
               <View style={inputCard(confirmFocused)}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ color: t.color.textMuted, fontSize: t.text.sm, fontWeight: "800" }}>
+                  <AppText variant="muted" weight="semibold" style={{ fontSize: t.text.sm }}>
                     Confirm password
-                  </Text>
+                  </AppText>
 
                   <Pressable
                     onPress={async () => {
@@ -330,11 +346,7 @@ export default function ResetPassword() {
                         borderColor: withAlpha(t.color.border, 0.95),
                       }}
                     >
-                      <Ionicons
-                        name={showConfirm ? "eye-off-outline" : "eye-outline"}
-                        size={18}
-                        color={t.color.textMuted}
-                      />
+                      <Ionicons name={showConfirm ? "eye-off-outline" : "eye-outline"} size={18} color={t.color.textMuted} />
                     </View>
                   </Pressable>
                 </View>
@@ -366,6 +378,8 @@ export default function ResetPassword() {
                     placeholderTextColor={withAlpha(t.color.textMuted, 0.65)}
                     onFocus={() => setConfirmFocused(true)}
                     onBlur={() => setConfirmFocused(false)}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     style={{
                       flex: 1,
                       color: t.color.text,
@@ -384,9 +398,9 @@ export default function ResetPassword() {
                       size={16}
                       color={newPassword.trim() === confirm.trim() ? "#2F7D6D" : "#B42318"}
                     />
-                    <Text style={{ color: t.color.textMuted, fontWeight: "800", fontSize: t.text.xs }}>
+                    <AppText variant="label" weight="medium">
                       {newPassword.trim() === confirm.trim() ? "Passwords match" : "Passwords don’t match"}
-                    </Text>
+                    </AppText>
                   </View>
                 ) : null}
               </View>
@@ -398,9 +412,7 @@ export default function ResetPassword() {
                     borderRadius: t.radius.xl,
                     borderWidth: 1,
                     borderColor: withAlpha(t.color.border, 0.95),
-                    backgroundColor: msg.toLowerCase().includes("updated")
-                      ? withAlpha(t.color.surfaceAlt, 0.65)
-                      : withAlpha(t.color.surfaceAlt, 0.65),
+                    backgroundColor: withAlpha(t.color.surfaceAlt, 0.65),
                     paddingHorizontal: 14,
                     paddingVertical: 12,
                     flexDirection: "row",
@@ -409,29 +421,23 @@ export default function ResetPassword() {
                   }}
                 >
                   <Ionicons
-                    name={msg.toLowerCase().includes("updated") ? "checkmark-circle" : "alert-circle"}
+                    name={isSuccessMsg ? "checkmark-circle" : "alert-circle"}
                     size={18}
-                    color={msg.toLowerCase().includes("updated") ? "#2F7D6D" : "#B42318"}
+                    color={isSuccessMsg ? "#2F7D6D" : "#B42318"}
                     style={{ marginTop: 2 }}
                   />
-                  <Text style={{ flex: 1, color: t.color.textMuted, fontWeight: "900", lineHeight: 20 }}>
+                  <AppText variant="muted" weight="semibold" style={{ flex: 1, lineHeight: 20 }}>
                     {msg}
-                  </Text>
+                  </AppText>
                 </View>
               ) : null}
 
               {/* CTA */}
               <Pressable onPress={onSubmit} disabled={!valid} style={({ pressed }) => primaryButtonStyle(pressed)}>
                 {busy ? <ActivityIndicator /> : null}
-                <Text
-                  style={{
-                    color: valid ? t.color.textOnAccent : t.color.textMuted,
-                    fontWeight: "900",
-                    fontSize: t.text.md,
-                  }}
-                >
+                <AppText variant="button" weight="semibold" style={{ color: valid ? t.color.textOnAccent : t.color.textMuted }}>
                   {busy ? "Updating..." : "Update password"}
-                </Text>
+                </AppText>
               </Pressable>
 
               {/* Back */}
@@ -443,9 +449,9 @@ export default function ResetPassword() {
                 style={({ pressed }) => secondaryButtonStyle(pressed)}
               >
                 <Ionicons name="log-in-outline" size={18} color={t.color.text} />
-                <Text style={{ color: t.color.text, fontWeight: "900", fontSize: t.text.md }}>
+                <AppText variant="body" weight="semibold" style={{ fontSize: t.text.md }}>
                   Back to sign in
-                </Text>
+                </AppText>
               </Pressable>
             </>
           )}

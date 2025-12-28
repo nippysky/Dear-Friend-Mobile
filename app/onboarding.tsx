@@ -95,8 +95,8 @@ export default function OnboardingScreen() {
   const finish = useCallback(async () => {
     await setSeenOnboarding();
     const tokens = await getTokens();
-    if (tokens?.access_token) router.replace("/" as any);
-    else router.replace("/signin" as any);
+    if (tokens?.access_token) router.replace("/");
+    else router.replace("/sign-in");
   }, [router]);
 
   const goNext = useCallback(async () => {
@@ -118,7 +118,7 @@ export default function OnboardingScreen() {
   const onAlready = useCallback(async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await setSeenOnboarding();
-    router.replace("/signin" as any);
+    router.replace("/sign-in");
   }, [router]);
 
   const onMomentumEnd = useCallback(

@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "../src/components/ui/AppText";
 import { useFeed, type FeedFilter, type FeedItem, type FeedPage } from "../src/hooks/useFeed";
 import { ApiError, apiFetch } from "../src/lib/api";
+import { hasSeenOnboarding } from "../src/lib/onboarding";
 import { requireAuth } from "../src/lib/requireAuth";
 import { clearTokens, getTokens } from "../src/lib/session";
 import { useTheme } from "../src/theme/ThemeProvider";
@@ -533,6 +534,32 @@ export default function FeedScreen() {
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
+  // ✅ Onboarding gate
+  const [booting, setBooting] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const seen = await hasSeenOnboarding();
+        if (!alive) return;
+
+        if (!seen) {
+          router.replace("/onboarding" as any);
+          return; // don’t render feed
+        }
+
+        setBooting(false);
+      } catch {
+        // If SecureStore fails for any reason, fail open (show app)
+        if (alive) setBooting(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [router]);
+
   const pageHeight = useMemo(() => Math.round(height), [height]);
   const headerOffset = insets.top + HEADER_HEIGHT + 18;
 
@@ -925,6 +952,16 @@ export default function FeedScreen() {
   );
 
   const isEmpty = !isPending && !isError && items.length === 0;
+
+  // ✅ Don’t render the feed while gating
+  if (booting) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.color.bg, alignItems: "center", justifyContent: "center" }}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: t.color.bg }}>
